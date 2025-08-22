@@ -1,0 +1,7 @@
+opencv-python
+numpy
+torch
+torchvision
+git+https://github.com/facebookresearch/segment-anything.git
+
+#segment-anything  # if pip-installable, else clone from github in Dockerfile
