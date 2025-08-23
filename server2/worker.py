@@ -20,8 +20,35 @@ PROCESSED_FILE = os.path.join(SHARED_DIR, "output", "processed.json")
 AREA_THRESH = 1000  # pixel area below which masks are treated as "smalls"
 MERGE_KERNEL = np.ones((5, 5), np.uint8)  # kernel for merging nearby masks
 
+
 os.makedirs(MASKS_DIR, exist_ok=True)
 os.makedirs(SMALLS_DIR, exist_ok=True)
+
+
+def load_processed_set():
+    """Build a set of base filenames that have already been processed."""
+    processed = set()
+    # Load from persisted json if present
+    if os.path.exists(PROCESSED_FILE):
+        try:
+            with open(PROCESSED_FILE, "r") as f:
+                processed.update(json.load(f))
+        except Exception:
+            pass
+    # Also include any masks that already exist on disk
+    for fname in os.listdir(MASKS_DIR):
+        if "_mask" in fname:
+            base = fname.split("_mask")[0]
+            processed.add(base)
+    return processed
+
+
+def save_processed_set(processed_set):
+    """Persist processed base filenames to disk atomically."""
+    tmp = PROCESSED_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(sorted(processed_set), f)
+    os.replace(tmp, PROCESSED_FILE)
 
 
 def load_processed_set():
@@ -85,6 +112,7 @@ def generate_masks(image_path, settings):
 #        pred_iou_thresh=settings["pred_iou_thresh"],
 #        stability_score_thresh=settings["stability_score_thresh"],
 #        crop_n_layers=settings["crop_n_layers"]
+        min_mask_region_area=1000
     )
 
     masks = mask_generator.generate(image)
@@ -120,6 +148,16 @@ def save_masks(masks, image, base_name):
             out_path = os.path.join(MASKS_DIR, f"{base_name}_mask{big_idx}.png")
             big_idx += 1
         cv2.imwrite(out_path, out)
+    """Save masks as PNGs to MASKS_DIR"""
+    for idx, mask_dict in enumerate(masks):
+        mask = mask_dict["segmentation"].astype(np.uint8) * 255
+        mask_file = os.path.join(MASKS_DIR, f"{base_name}_mask{idx}.png")
+        # Resize to original image size if needed
+        if mask.shape != image.shape[:2]:
+            mask = cv2.resize(
+                mask, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_NEAREST
+            )
+        cv2.imwrite(mask_file, mask)
 
 # -------------------------
 # Watcher loop
