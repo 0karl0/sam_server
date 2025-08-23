@@ -22,7 +22,7 @@ except Exception:  # pragma: no cover - torch may not be installed
 
 # Rembg does not ship a model named "dis". Use the default "u2net" model
 # to avoid runtime errors when initializing the background removal session.
-_REMBG_SESSION = new_session("u2net", providers=_REMBG_PROVIDERS)
+_REMBG_SESSION = new_session("birefnet-dis", providers=_REMBG_PROVIDERS)
 
 # -------------------------
 # Config / directories
@@ -276,8 +276,10 @@ while True:
                     largest = max(masks, key=lambda m: int(np.count_nonzero(m["segmentation"])))
                     if _is_mostly_one_color(img, largest["segmentation"]):
                         try:
+                            print("refining with birefnet")
                             largest["segmentation"] = _refine_mask_with_birefnet(img).astype(bool)
                         except Exception:
+                            print("refining with rembg")
                             largest["segmentation"] = _refine_mask_with_rembg(img).astype(bool)
                     h, w = img.shape[:2]
                     total_pixels = h * w
