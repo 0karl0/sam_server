@@ -26,6 +26,7 @@
     input[type="range"]{height:34px}
     .grid{display:grid; grid-template-columns:1fr; gap:16px}
     @media(min-width:1024px){ .grid{grid-template-columns:380px 1fr} }
+    .grid.hide-gallery{grid-template-columns:1fr !important}
 
     /* Albums (originals + crops) */
     .albums{padding:12px}
@@ -118,12 +119,15 @@
             <button class="btn" id="saveBtn" type="button">Save settings</button>
           </div>
         </details>
+
+        <button class="btn ghost" id="toggleGallery">Hide Originals & Clippings</button>
+
       </div>
     </header>
 
-  <main class="wrap grid">
+  <main id="mainGrid" class="wrap grid hide-gallery">
     <!-- LEFT: Albums / Originals -->
-    <section class="card albums">
+    <section class="card albums" id="albumsSection" style="display:none;">
       <h3 style="margin:4px 0 12px 2px; color:var(--sub);">Originals & Clippings</h3>
       <div id="albums"></div>
     </section>
@@ -242,6 +246,24 @@
       input.value = "";
       updateQueueStatus();
       processQueue();
+    });
+
+    // ---------- toggle gallery ----------
+    const toggleBtn = document.getElementById("toggleGallery");
+    const albumsSection = document.getElementById("albumsSection");
+    const mainGrid = document.getElementById("mainGrid");
+    toggleBtn.addEventListener("click", () => {
+      const hidden = albumsSection.style.display === "none";
+      if (hidden) {
+        albumsSection.style.display = "block";
+        mainGrid.classList.remove("hide-gallery");
+        toggleBtn.textContent = "Hide Originals & Clippings";
+      } else {
+        albumsSection.style.display = "none";
+        mainGrid.classList.add("hide-gallery");
+        toggleBtn.textContent = "Show Originals & Clippings";
+      }
+
     });
 
     // ---------- albums (originals + crops) ----------
