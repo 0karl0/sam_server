@@ -14,7 +14,9 @@ try:
 except Exception:  # pragma: no cover - torch may not be installed
     _REMBG_PROVIDERS = ["CPUExecutionProvider"]
 
-_REMBG_SESSION = new_session("dis", providers=_REMBG_PROVIDERS)
+# Rembg does not ship a model named "dis". Use the default "u2net" model
+# to avoid runtime errors when initializing the background removal session.
+_REMBG_SESSION = new_session("u2net", providers=_REMBG_PROVIDERS)
 
 # -------------------------
 # Config / directories
