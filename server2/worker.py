@@ -10,8 +10,14 @@ from rembg import remove, new_session
 
 try:
     import torch  # type: ignore
-    _REMBG_PROVIDERS = ["CUDAExecutionProvider", "CPUExecutionProvider"] if torch.cuda.is_available() else ["CPUExecutionProvider"]
+    _TORCH_AVAILABLE = True
+    _REMBG_PROVIDERS = [
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider",
+    ] if torch.cuda.is_available() else ["CPUExecutionProvider"]
 except Exception:  # pragma: no cover - torch may not be installed
+    torch = None  # type: ignore
+    _TORCH_AVAILABLE = False
     _REMBG_PROVIDERS = ["CPUExecutionProvider"]
 
 # Rembg does not ship a model named "dis". Use the default "u2net" model
@@ -26,6 +32,7 @@ RESIZED_DIR = os.path.join(SHARED_DIR, "resized")
 MASKS_DIR = os.path.join(SHARED_DIR, "output", "masks")
 SMALLS_DIR = os.path.join(SHARED_DIR, "output", "smalls")
 CONFIG_FILE = os.path.join(SHARED_DIR, "config", "settings.json")
+BIRENET_MODEL_PATH = os.path.join(SHARED_DIR, "models", "birefnet_dis.pth")
 MODEL_PATH = os.path.join(SHARED_DIR, "models", "vit_l.pth")
 PROCESSED_FILE = os.path.join(SHARED_DIR, "output", "processed.json")
 
@@ -49,6 +56,31 @@ def _refine_mask_with_rembg(image_bgr: np.ndarray) -> np.ndarray:
     result = remove(pil_img, session=_REMBG_SESSION)
     alpha = np.array(result)[..., 3]
     return (alpha > 0).astype(np.uint8)
+
+
+try:
+    from birefnet import BiRefNet  # type: ignore
+    if _TORCH_AVAILABLE and os.path.exists(BIRENET_MODEL_PATH):
+        _BIRENET_MODEL = BiRefNet()
+        _BIRENET_MODEL.load_state_dict(
+            torch.load(BIRENET_MODEL_PATH, map_location="cpu")
+        )
+        _BIRENET_MODEL.eval()
+    else:  # pragma: no cover - model file missing
+        _BIRENET_MODEL = None
+except Exception:  # pragma: no cover - birefnet not installed
+    _BIRENET_MODEL = None
+
+
+def _refine_mask_with_birefnet(image_bgr: np.ndarray) -> np.ndarray:
+    if _BIRENET_MODEL is None:
+        raise RuntimeError("BiRefNet model not available")
+    img_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+    tensor = torch.from_numpy(img_rgb).float().permute(2, 0, 1).unsqueeze(0) / 255.0
+    with torch.no_grad():
+        pred = _BIRENET_MODEL(tensor)[0]
+    mask = (pred.sigmoid().squeeze().cpu().numpy() > 0.5).astype(np.uint8)
+    return mask
 
 
 def load_processed_set():
@@ -206,7 +238,15 @@ while True:
             if masks:
                 largest = max(masks, key=lambda m: int(np.count_nonzero(m["segmentation"])))
                 if _is_mostly_one_color(img, largest["segmentation"]):
-                    largest["segmentation"] = _refine_mask_with_rembg(img).astype(bool)
+                    try:
+                        largest["segmentation"] = _refine_mask_with_birefnet(img).astype(bool)
+                    except Exception:
+                        largest["segmentation"] = _refine_mask_with_rembg(img).astype(bool)
+                h, w = img.shape[:2]
+                total_pixels = h * w
+                for m in masks:
+                    if np.count_nonzero(m["segmentation"]) > 0.9 * total_pixels:
+                        m["segmentation"] = np.logical_not(m["segmentation"])
             save_masks(masks, img, base)
             processed.add(base)
             save_processed_set(processed)
