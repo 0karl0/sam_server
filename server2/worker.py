@@ -50,11 +50,13 @@ def _is_mostly_one_color(image_bgr: np.ndarray, mask: np.ndarray, threshold: flo
     pixels = image_bgr[mask > 0]
     if pixels.size == 0:
         return False
+    print("mostly 1 color")
     return float(pixels.std(axis=0).mean()) < threshold
 
 
 def _refine_mask_with_rembg(image_bgr: np.ndarray) -> np.ndarray:
     pil_img = Image.fromarray(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
+    print("running rembg remove")
     result = remove(pil_img, session=_REMBG_SESSION)
     alpha = np.array(result)[..., 3]
     return (alpha > 0).astype(np.uint8)
@@ -90,6 +92,8 @@ def _is_line_drawing(image_bgr: np.ndarray) -> bool:
     edges = cv2.Canny(gray, 50, 150)
     edge_ratio = float(np.count_nonzero(edges)) / edges.size
     color_std = float(image_bgr.std())
+    if edge_ratio > 0.05 and color_std < 25.0:
+         print("likely a line drawing")
     return edge_ratio > 0.05 and color_std < 25.0
 
 
