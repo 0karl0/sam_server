@@ -31,6 +31,7 @@ SHARED_DIR = "/mnt/shared"
 RESIZED_DIR = os.path.join(SHARED_DIR, "resized")
 MASKS_DIR = os.path.join(SHARED_DIR, "output", "masks")
 SMALLS_DIR = os.path.join(SHARED_DIR, "output", "smalls")
+CROPS_DIR = os.path.join(SHARED_DIR, "output", "crops")
 CONFIG_FILE = os.path.join(SHARED_DIR, "config", "settings.json")
 BIRENET_MODEL_PATH = os.path.join(SHARED_DIR, "models", "birefnet_dis.pth")
 MODEL_PATH = os.path.join(SHARED_DIR, "models", "vit_l.pth")
@@ -42,6 +43,7 @@ MERGE_KERNEL = np.ones((5, 5), np.uint8)  # kernel for merging nearby masks
 
 os.makedirs(MASKS_DIR, exist_ok=True)
 os.makedirs(SMALLS_DIR, exist_ok=True)
+os.makedirs(CROPS_DIR, exist_ok=True)
 
 
 def _is_mostly_one_color(image_bgr: np.ndarray, mask: np.ndarray, threshold: float = 15.0) -> bool:
@@ -81,6 +83,25 @@ def _refine_mask_with_birefnet(image_bgr: np.ndarray) -> np.ndarray:
         pred = _BIRENET_MODEL(tensor)[0]
     mask = (pred.sigmoid().squeeze().cpu().numpy() > 0.5).astype(np.uint8)
     return mask
+
+
+def _is_line_drawing(image_bgr: np.ndarray) -> bool:
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150)
+    edge_ratio = float(np.count_nonzero(edges)) / edges.size
+    color_std = float(image_bgr.std())
+    return edge_ratio > 0.05 and color_std < 25.0
+
+
+def _crop_with_mask(image_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray | None:
+    mask_u8 = (mask > 0).astype(np.uint8) * 255
+    coords = cv2.findNonZero(mask_u8)
+    if coords is None:
+        return None
+    x, y, w, h = cv2.boundingRect(coords)
+    bgra = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2BGRA)
+    bgra[:, :, 3] = mask_u8
+    return bgra[y:y+h, x:x+w]
 
 
 def load_processed_set():
@@ -234,23 +255,34 @@ while True:
         start = time.process_time()
         print(f"[Worker] Processing {f} ...")
         try:
-            masks, img = generate_masks(file_path, settings)
-            if masks:
-                largest = max(masks, key=lambda m: int(np.count_nonzero(m["segmentation"])))
-                if _is_mostly_one_color(img, largest["segmentation"]):
-                    try:
-                        largest["segmentation"] = _refine_mask_with_birefnet(img).astype(bool)
-                    except Exception:
-                        largest["segmentation"] = _refine_mask_with_rembg(img).astype(bool)
-                h, w = img.shape[:2]
-                total_pixels = h * w
-                for m in masks:
-                    if np.count_nonzero(m["segmentation"]) > 0.9 * total_pixels:
-                        m["segmentation"] = np.logical_not(m["segmentation"])
-            save_masks(masks, img, base)
+            img = cv2.imread(file_path)
+            if img is None:
+                continue
+            if _is_line_drawing(img):
+                mask = _refine_mask_with_birefnet(img)
+                crop = _crop_with_mask(img, mask)
+                mask_file = os.path.join(MASKS_DIR, f"{base}_mask0.png")
+                cv2.imwrite(mask_file, mask.astype(np.uint8) * 255)
+                if crop is not None:
+                    crop_file = os.path.join(CROPS_DIR, f"{base}_mask0.png")
+                    cv2.imwrite(crop_file, crop)
+            else:
+                masks, img = generate_masks(file_path, settings)
+                if masks:
+                    largest = max(masks, key=lambda m: int(np.count_nonzero(m["segmentation"])))
+                    if _is_mostly_one_color(img, largest["segmentation"]):
+                        try:
+                            largest["segmentation"] = _refine_mask_with_birefnet(img).astype(bool)
+                        except Exception:
+                            largest["segmentation"] = _refine_mask_with_rembg(img).astype(bool)
+                    h, w = img.shape[:2]
+                    total_pixels = h * w
+                    for m in masks:
+                        if np.count_nonzero(m["segmentation"]) > 0.9 * total_pixels:
+                            m["segmentation"] = np.logical_not(m["segmentation"])
+                save_masks(masks, img, base)
             processed.add(base)
             save_processed_set(processed)
-            # Clean up memory
             gc.collect()
             end = time.process_time()
             total = end - start
