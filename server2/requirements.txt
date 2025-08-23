@@ -5,6 +5,6 @@ torchvision
 git+https://github.com/facebookresearch/segment-anything.git
 rembg
 onnxruntime
-birefnet
+#birefnet
 
 #segment-anything  # if pip-installable, else clone from github in Dockerfile
