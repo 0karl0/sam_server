@@ -3,6 +3,7 @@ import json
 import threading
 import time
 from typing import List, Dict
+import shutil
 
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
@@ -20,6 +21,8 @@ INPUT_DIR    = os.path.join(SHARED_DIR, "input")              # originals (PNG-n
 RESIZED_DIR  = os.path.join(SHARED_DIR, "resized")            # ≤1024 for SAM
 MASKS_DIR    = os.path.join(SHARED_DIR, "output", "masks")    # from Server2
 CROPS_DIR    = os.path.join(SHARED_DIR, "output", "crops")    # RGBA crops
+SMALLS_DIR   = os.path.join(SHARED_DIR, "output", "smalls")
+PROCESSED_FILE = os.path.join(SHARED_DIR, "output", "processed.json")
 CONFIG_DIR   = os.path.join(SHARED_DIR, "config")
 SETTINGS_JSON = os.path.join(CONFIG_DIR, "settings.json")
 CROPS_INDEX   = os.path.join(CROPS_DIR, "index.json")         # manifest linking crops to original
@@ -27,13 +30,16 @@ CROPS_INDEX   = os.path.join(CROPS_DIR, "index.json")         # manifest linking
 MAX_RESIZE = 1024  # longest side for SAM
 ALLOWED_EXT = {"png", "jpg", "jpeg", "webp", "bmp", "tiff", "heic", "heif"}
 
-for d in [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, CONFIG_DIR]:
+for d in [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR, CONFIG_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # Register HEIF opener for Pillow
 pillow_heif.register_heif_opener()
 
 app = Flask(__name__)
+
+# Track which mask files have been processed into crops
+_processed_mask_files = set()
 
 # -------------------------
 # Helpers
@@ -179,7 +185,18 @@ def list_originals():
         if not f.lower().endswith(".png"):
             continue
         crop_files = index.get(f, [])
-        crops = [{"file": c, "url": f"/crops/{c}"} for c in crop_files]
+        crops = []
+        for c in crop_files:
+            crop_path = os.path.join(CROPS_DIR, c)
+            area = 0
+            try:
+                img = cv2.imread(crop_path, cv2.IMREAD_UNCHANGED)
+                if img is not None:
+                    h, w = img.shape[:2]
+                    area = int(h * w)
+            except Exception:
+                pass
+            crops.append({"file": c, "url": f"/crops/{c}", "area": area})
         albums.append({
             "original": f,
             "original_url": f"/input/{f}",
@@ -241,11 +258,33 @@ def list_crops():
             })
     return jsonify(items)
 
+
+@app.route("/clear_all", methods=["POST"])
+def clear_all():
+    """Remove all processed images and trackers."""
+    dirs = [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR]
+    for d in dirs:
+        for name in os.listdir(d):
+            path = os.path.join(d, name)
+            try:
+                if os.path.isfile(path) or os.path.islink(path):
+                    os.remove(path)
+                else:
+                    shutil.rmtree(path)
+            except Exception:
+                pass
+    for f in [CROPS_INDEX, PROCESSED_FILE]:
+        try:
+            if os.path.exists(f):
+                os.remove(f)
+        except Exception:
+            pass
+    _processed_mask_files.clear()
+    return jsonify({"status": "cleared"})
+
 # -------------------------
 # Mask watcher → cropper (runs in background)
 # -------------------------
-_processed_mask_files = set()
-
 def process_mask_file(mask_path: str):
     """
     Given a mask PNG path like .../masks/<stem>_maskN.png

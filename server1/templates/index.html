@@ -121,6 +121,7 @@
         </details>
 
         <button class="btn ghost" id="toggleGallery">Hide Originals & Clippings</button>
+        <button class="btn ghost" id="clearProcessed">Clear Processed</button>
 
       </div>
     </header>
@@ -266,6 +267,17 @@
 
     });
 
+    const clearBtn = document.getElementById("clearProcessed");
+    clearBtn.addEventListener("click", async ()=>{
+      if(!confirm("Delete all processed images?")) return;
+      await fetch("/clear_all", {method:"POST"});
+      autoAdded.clear();
+      layer.destroyChildren();
+      layer.add(tr);
+      layer.batchDraw();
+      refreshAlbums();
+    });
+
     // ---------- albums (originals + crops) ----------
     const openState = {};  // { "file.png": true/false }
     let lastUserAction = 0;
@@ -319,6 +331,7 @@
         card.appendChild(head); card.appendChild(body);
         host.appendChild(card);
       });
+      autoAddBiggestCrops(albums);
     }
 
     // initial + polling (debounced while interacting)
@@ -352,30 +365,60 @@
   }
   stage.on("click tap", (e)=>{ if(e.target===stage) selectNode(null); });
 
+  const autoAdded = new Set();
+
+  function placeImageOnCanvas(img, x, y){
+    const node = new Konva.Image({
+      image: img,
+      x: x,
+      y: y,
+      draggable: true,
+    });
+    layer.add(node);
+    node.moveToTop();
+    node.on("click tap", ()=> selectNode(node));
+    node.on("transformend", ()=>{
+      const sx=node.scaleX(), sy=node.scaleY();
+      node.width(Math.max(1, node.width()*sx));
+      node.height(Math.max(1, node.height()*sy));
+      node.scale({x:1,y:1});
+      layer.batchDraw();
+    });
+    selectNode(node);
+  }
+
   // ---------- Add image at actual pixel size ----------
   function addToCanvas(url){
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = function(){
-      const node = new Konva.Image({
-        image: img,
-        x: stage.width()/2 - img.width/2,
-        y: stage.height()/2 - img.height/2,
-        draggable: true,
-      });
-      layer.add(node);
-      node.moveToTop();
-      node.on("click tap", ()=> selectNode(node));
-      node.on("transformend", ()=>{
-        const sx=node.scaleX(), sy=node.scaleY();
-        node.width(Math.max(1, node.width()*sx));
-        node.height(Math.max(1, node.height()*sy));
-        node.scale({x:1,y:1});
-        layer.batchDraw();
-      });
-      selectNode(node);
+      placeImageOnCanvas(img, stage.width()/2 - img.width/2, stage.height()/2 - img.height/2);
     };
     img.src = url;
+  }
+
+  function addToCanvasRandom(url){
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = function(){
+      const x = Math.random() * Math.max(0, stage.width() - img.width);
+      const y = Math.random() * Math.max(0, stage.height() - img.height);
+      placeImageOnCanvas(img, x, y);
+    };
+    img.src = url;
+  }
+
+  function autoAddBiggestCrops(albums){
+    albums.forEach(a=>{
+      if(!a.crops) return;
+      const sorted=[...a.crops].sort((a,b)=> (b.area||0)-(a.area||0));
+      sorted.slice(0,3).forEach(c=>{
+        if(!autoAdded.has(c.file)){
+          addToCanvasRandom(c.url);
+          autoAdded.add(c.file);
+        }
+      });
+    });
   }
 
   // ---------- View helpers (zoom/pan/fit/reset) ----------
