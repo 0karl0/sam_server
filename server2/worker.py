@@ -5,6 +5,16 @@ import cv2
 import gc
 import numpy as np
 from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
+from PIL import Image
+from rembg import remove, new_session
+
+try:
+    import torch  # type: ignore
+    _REMBG_PROVIDERS = ["CUDAExecutionProvider", "CPUExecutionProvider"] if torch.cuda.is_available() else ["CPUExecutionProvider"]
+except Exception:  # pragma: no cover - torch may not be installed
+    _REMBG_PROVIDERS = ["CPUExecutionProvider"]
+
+_REMBG_SESSION = new_session("dis", providers=_REMBG_PROVIDERS)
 
 # -------------------------
 # Config / directories
@@ -23,6 +33,20 @@ MERGE_KERNEL = np.ones((5, 5), np.uint8)  # kernel for merging nearby masks
 
 os.makedirs(MASKS_DIR, exist_ok=True)
 os.makedirs(SMALLS_DIR, exist_ok=True)
+
+
+def _is_mostly_one_color(image_bgr: np.ndarray, mask: np.ndarray, threshold: float = 15.0) -> bool:
+    pixels = image_bgr[mask > 0]
+    if pixels.size == 0:
+        return False
+    return float(pixels.std(axis=0).mean()) < threshold
+
+
+def _refine_mask_with_rembg(image_bgr: np.ndarray) -> np.ndarray:
+    pil_img = Image.fromarray(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
+    result = remove(pil_img, session=_REMBG_SESSION)
+    alpha = np.array(result)[..., 3]
+    return (alpha > 0).astype(np.uint8)
 
 
 def load_processed_set():
@@ -177,6 +201,10 @@ while True:
         print(f"[Worker] Processing {f} ...")
         try:
             masks, img = generate_masks(file_path, settings)
+            if masks:
+                largest = max(masks, key=lambda m: int(np.count_nonzero(m["segmentation"])))
+                if _is_mostly_one_color(img, largest["segmentation"]):
+                    largest["segmentation"] = _refine_mask_with_rembg(img).astype(bool)
             save_masks(masks, img, base)
             processed.add(base)
             save_processed_set(processed)

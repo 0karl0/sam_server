@@ -3,5 +3,7 @@ numpy
 torch
 torchvision
 git+https://github.com/facebookresearch/segment-anything.git
+rembg
+onnxruntime
 
 #segment-anything  # if pip-installable, else clone from github in Dockerfile
