@@ -108,11 +108,11 @@ def generate_masks(image_path, settings):
 
     mask_generator = SamAutomaticMaskGenerator(
         sam,
-#        points_per_side=settings["points_per_side"],
-#        pred_iou_thresh=settings["pred_iou_thresh"],
-#        stability_score_thresh=settings["stability_score_thresh"],
-#        crop_n_layers=settings["crop_n_layers"]
-        min_mask_region_area=1000
+        points_per_side=settings["points_per_side"],
+        pred_iou_thresh=settings["pred_iou_thresh"],
+        stability_score_thresh=settings["stability_score_thresh"],
+        crop_n_layers=settings["crop_n_layers"]
+       # min_mask_region_area=1000
     )
 
     masks = mask_generator.generate(image)
