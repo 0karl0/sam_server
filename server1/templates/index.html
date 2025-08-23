@@ -26,6 +26,7 @@
     input[type="range"]{height:34px}
     .grid{display:grid; grid-template-columns:1fr; gap:16px}
     @media(min-width:1024px){ .grid{grid-template-columns:380px 1fr} }
+    .grid.hide-gallery{grid-template-columns:1fr !important}
 
     /* Albums (originals + crops) */
     .albums{padding:12px}
@@ -66,53 +67,66 @@
     width: 16px; height: 16px; border-radius: 4px;
     background: #1a1d25; margin-right: 6px; cursor: grab;
   }
-  .relative-container {
-    position: relative; /* so floating controls can anchor */
-  }
+    .relative-container {
+      position: relative; /* so floating controls can anchor */
+    }
+
+    /* Collapsible panels */
+    details.card{padding:8px 10px;}
+    details.card>summary{cursor:pointer; user-select:none;}
 
   </style>
 </head>
 <body>
-  <header>
-    <div class="wrap bar">
-      <!-- Upload -->
-      <form id="uploadForm" class="card" style="padding:8px 10px; display:flex; gap:10px; align-items:center;">
-        <input type="file" name="file" accept="image/*,.heic,.HEIC" />
-        <button class="btn" type="submit">Upload</button>
-      </form>
+    <header>
+      <div class="wrap bar">
+        <!-- Upload Queue -->
+        <details class="card" id="uploadSection">
+          <summary>Upload</summary>
+          <form id="uploadForm" style="margin-top:8px; display:flex; gap:10px; align-items:center;">
+            <input type="file" name="file" accept="image/*,.heic,.HEIC" multiple />
+            <button class="btn" type="submit">Add to Queue</button>
+          </form>
+          <div id="queueStatus" style="margin-top:4px; color:var(--sub); font-size:12px;"></div>
+        </details>
 
-      <!-- Settings -->
-      <div class="card" style="padding:8px 10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-        <label>Model
-          <select id="model_type">
-            <option value="vit_b">ViT-B</option>
-            <option value="vit_l">ViT-L</option>
-            <option value="vit_h">ViT-H</option>
-          </select>
-        </label>
-        <label>Points
-          <input type="range" id="points_slider" min="8" max="128" value="32" />
-          <input type="number" id="points_input" min="8" max="128" value="32" style="width:80px" />
-        </label>
-        <label>IoU
-          <input type="range" id="iou_slider" min="0.5" max="0.99" step="0.01" value="0.88" />
-          <input type="number" id="iou_input" min="0.5" max="0.99" step="0.01" value="0.88" style="width:80px" />
-        </label>
-        <label>Stability
-          <input type="range" id="stab_slider" min="0.5" max="0.99" step="0.01" value="0.95" />
-          <input type="number" id="stab_input" min="0.5" max="0.99" step="0.01" value="0.95" style="width:80px" />
-        </label>
-        <label>Crop layers
-          <input type="number" id="crop_layers" min="0" max="3" value="1" style="width:80px" />
-        </label>
-        <button class="btn" id="saveBtn" type="button">Save settings</button>
+        <!-- SAM Controls -->
+        <details class="card" id="samSection">
+          <summary>SAM Controls</summary>
+          <div style="margin-top:8px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <label>Model
+              <select id="model_type">
+                <option value="vit_b">ViT-B</option>
+                <option value="vit_l">ViT-L</option>
+                <option value="vit_h">ViT-H</option>
+              </select>
+            </label>
+            <label>Points
+              <input type="range" id="points_slider" min="8" max="128" value="32" />
+              <input type="number" id="points_input" min="8" max="128" value="32" style="width:80px" />
+            </label>
+            <label>IoU
+              <input type="range" id="iou_slider" min="0.5" max="0.99" step="0.01" value="0.88" />
+              <input type="number" id="iou_input" min="0.5" max="0.99" step="0.01" value="0.88" style="width:80px" />
+            </label>
+            <label>Stability
+              <input type="range" id="stab_slider" min="0.5" max="0.99" step="0.01" value="0.95" />
+              <input type="number" id="stab_input" min="0.5" max="0.99" step="0.01" value="0.95" style="width:80px" />
+            </label>
+            <label>Crop layers
+              <input type="number" id="crop_layers" min="0" max="3" value="1" style="width:80px" />
+            </label>
+            <button class="btn" id="saveBtn" type="button">Save settings</button>
+          </div>
+        </details>
+
+        <button class="btn ghost" id="toggleGallery">Hide Originals & Clippings</button>
       </div>
-    </div>
-  </header>
+    </header>
 
-  <main class="wrap grid">
+  <main id="mainGrid" class="wrap grid hide-gallery">
     <!-- LEFT: Albums / Originals -->
-    <section class="card albums">
+    <section class="card albums" id="albumsSection" style="display:none;">
       <h3 style="margin:4px 0 12px 2px; color:var(--sub);">Originals & Clippings</h3>
       <div id="albums"></div>
     </section>
@@ -192,14 +206,62 @@
       alert("Settings saved");
     });
 
-    // ---------- upload (fetch; prevent JSON navigation) ----------
-    document.getElementById("uploadForm").addEventListener("submit", async (e)=>{
+    // ---------- upload queue ----------
+    const uploadQueue = [];
+    let uploading = false;
+    const queueStatus = document.getElementById("queueStatus");
+
+    function updateQueueStatus(){
+      if(uploading){
+        queueStatus.textContent = `Uploading... ${uploadQueue.length} left`;
+      } else if(uploadQueue.length>0){
+        queueStatus.textContent = `${uploadQueue.length} queued`;
+      } else {
+        queueStatus.textContent = "";
+      }
+    }
+
+    async function processQueue(){
+      if(uploading) return;
+      uploading = true;
+      while(uploadQueue.length>0){
+        updateQueueStatus();
+        const file = uploadQueue.shift();
+        const fd = new FormData();
+        fd.append("file", file, file.name);
+        const res = await fetch("/upload",{method:"POST", body:fd, headers:{Accept:"application/json"}});
+        if(!res.ok){ console.error("Upload failed for", file.name); }
+        await refreshAlbums();
+      }
+      uploading = false;
+      updateQueueStatus();
+    }
+
+    document.getElementById("uploadForm").addEventListener("submit", (e)=>{
       e.preventDefault();
-      const fd = new FormData(e.target);
-      const res = await fetch("/upload",{method:"POST", body:fd, headers:{Accept:"application/json"}});
-      if(!res.ok){ alert("Upload failed"); return; }
-      await refreshAlbums();
-      e.target.reset();
+      const input = e.target.querySelector('input[name="file"]');
+      const files = input.files;
+      for(const f of files) uploadQueue.push(f);
+      input.value = "";
+      updateQueueStatus();
+      processQueue();
+    });
+
+    // ---------- toggle gallery ----------
+    const toggleBtn = document.getElementById("toggleGallery");
+    const albumsSection = document.getElementById("albumsSection");
+    const mainGrid = document.getElementById("mainGrid");
+    toggleBtn.addEventListener("click", () => {
+      const hidden = albumsSection.style.display === "none";
+      if (hidden) {
+        albumsSection.style.display = "block";
+        mainGrid.classList.remove("hide-gallery");
+        toggleBtn.textContent = "Hide Originals & Clippings";
+      } else {
+        albumsSection.style.display = "none";
+        mainGrid.classList.add("hide-gallery");
+        toggleBtn.textContent = "Show Originals & Clippings";
+      }
     });
 
     // ---------- albums (originals + crops) ----------
