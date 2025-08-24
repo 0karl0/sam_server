@@ -33,7 +33,6 @@ MASKS_DIR = os.path.join(SHARED_DIR, "output", "masks")
 SMALLS_DIR = os.path.join(SHARED_DIR, "output", "smalls")
 CROPS_DIR = os.path.join(SHARED_DIR, "output", "crops")
 CONFIG_FILE = os.path.join(SHARED_DIR, "config", "settings.json")
-BIRENET_MODEL_PATH = os.path.join(SHARED_DIR, "models", "birefnet_dis.pth")
 MODEL_PATH = os.path.join(SHARED_DIR, "models", "vit_l.pth")
 PROCESSED_FILE = os.path.join(SHARED_DIR, "output", "processed.json")
 
@@ -46,45 +45,12 @@ os.makedirs(SMALLS_DIR, exist_ok=True)
 os.makedirs(CROPS_DIR, exist_ok=True)
 
 
-def _is_mostly_one_color(image_bgr: np.ndarray, mask: np.ndarray, threshold: float = 15.0) -> bool:
-    pixels = image_bgr[mask > 0]
-    if pixels.size == 0:
-        return False
-    print("mostly 1 color")
-    return float(pixels.std(axis=0).mean()) < threshold
-
-
 def _refine_mask_with_rembg(image_bgr: np.ndarray) -> np.ndarray:
     pil_img = Image.fromarray(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
     print("running rembg remove")
     result = remove(pil_img, session=_REMBG_SESSION)
     alpha = np.array(result)[..., 3]
     return (alpha > 0).astype(np.uint8)
-
-
-try:
-    from birefnet import BiRefNet  # type: ignore
-    if _TORCH_AVAILABLE and os.path.exists(BIRENET_MODEL_PATH):
-        _BIRENET_MODEL = BiRefNet()
-        _BIRENET_MODEL.load_state_dict(
-            torch.load(BIRENET_MODEL_PATH, map_location="cpu")
-        )
-        _BIRENET_MODEL.eval()
-    else:  # pragma: no cover - model file missing
-        _BIRENET_MODEL = None
-except Exception:  # pragma: no cover - birefnet not installed
-    _BIRENET_MODEL = None
-
-
-def _refine_mask_with_birefnet(image_bgr: np.ndarray) -> np.ndarray:
-    if _BIRENET_MODEL is None:
-        raise RuntimeError("BiRefNet model not available")
-    img_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-    tensor = torch.from_numpy(img_rgb).float().permute(2, 0, 1).unsqueeze(0) / 255.0
-    with torch.no_grad():
-        pred = _BIRENET_MODEL(tensor)[0]
-    mask = (pred.sigmoid().squeeze().cpu().numpy() > 0.5).astype(np.uint8)
-    return mask
 
 
 def _is_line_drawing(image_bgr: np.ndarray) -> bool:
@@ -106,32 +72,6 @@ def _crop_with_mask(image_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray | Non
     bgra = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2BGRA)
     bgra[:, :, 3] = mask_u8
     return bgra[y:y+h, x:x+w]
-
-
-def load_processed_set():
-    """Build a set of base filenames that have already been processed."""
-    processed = set()
-    # Load from persisted json if present
-    if os.path.exists(PROCESSED_FILE):
-        try:
-            with open(PROCESSED_FILE, "r") as f:
-                processed.update(json.load(f))
-        except Exception:
-            pass
-    # Also include any masks that already exist on disk
-    for fname in os.listdir(MASKS_DIR):
-        if "_mask" in fname:
-            base = fname.split("_mask")[0]
-            processed.add(base)
-    return processed
-
-
-def save_processed_set(processed_set):
-    """Persist processed base filenames to disk atomically."""
-    tmp = PROCESSED_FILE + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(sorted(processed_set), f)
-    os.replace(tmp, PROCESSED_FILE)
 
 
 def load_processed_set():
@@ -263,7 +203,8 @@ while True:
             if img is None:
                 continue
             if _is_line_drawing(img):
-                mask = _refine_mask_with_birefnet(img)
+                print("[Worker] Using rembg for line drawing")
+                mask = _refine_mask_with_rembg(img)
                 crop = _crop_with_mask(img, mask)
                 mask_file = os.path.join(MASKS_DIR, f"{base}_mask0.png")
                 cv2.imwrite(mask_file, mask.astype(np.uint8) * 255)
@@ -271,21 +212,8 @@ while True:
                     crop_file = os.path.join(CROPS_DIR, f"{base}_mask0.png")
                     cv2.imwrite(crop_file, crop)
             else:
+                print("[Worker] Using SAM for segmentation")
                 masks, img = generate_masks(file_path, settings)
-                if masks:
-                    largest = max(masks, key=lambda m: int(np.count_nonzero(m["segmentation"])))
-                    if _is_mostly_one_color(img, largest["segmentation"]):
-                        try:
-                            print("refining with birefnet")
-                            largest["segmentation"] = _refine_mask_with_birefnet(img).astype(bool)
-                        except Exception:
-                            print("refining with rembg")
-                            largest["segmentation"] = _refine_mask_with_rembg(img).astype(bool)
-                    h, w = img.shape[:2]
-                    total_pixels = h * w
-                    for m in masks:
-                        if np.count_nonzero(m["segmentation"]) > 0.9 * total_pixels:
-                            m["segmentation"] = np.logical_not(m["segmentation"])
                 save_masks(masks, img, base)
             processed.add(base)
             save_processed_set(processed)
