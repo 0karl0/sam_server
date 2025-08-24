@@ -283,9 +283,18 @@ while True:
                             largest["segmentation"] = _refine_mask_with_rembg(img).astype(bool)
                     h, w = img.shape[:2]
                     total_pixels = h * w
-                    for m in masks:
-                        if np.count_nonzero(m["segmentation"]) > 0.9 * total_pixels:
-                            m["segmentation"] = np.logical_not(m["segmentation"])
+                    center_y, center_x = h // 2, w // 2
+                    for m in list(masks):
+                        seg = m["segmentation"]
+                        seg_resized = seg
+                        if seg.shape != (h, w):
+                            seg_resized = cv2.resize(
+                                seg.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST
+                            ).astype(bool)
+                        if np.count_nonzero(seg_resized) > 0.9 * total_pixels and not seg_resized[center_y, center_x]:
+                            inverse = m.copy()
+                            inverse["segmentation"] = np.logical_not(seg)
+                            masks.append(inverse)
                 save_masks(masks, img, base)
             processed.add(base)
             save_processed_set(processed)
