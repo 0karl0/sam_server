@@ -214,6 +214,30 @@ while True:
             else:
                 print("[Worker] Using SAM for segmentation")
                 masks, img = generate_masks(file_path, settings)
+
+                if masks:
+                    largest = max(masks, key=lambda m: int(np.count_nonzero(m["segmentation"])))
+                    if _is_mostly_one_color(img, largest["segmentation"]):
+                        try:
+                            print("refining with birefnet")
+                            largest["segmentation"] = _refine_mask_with_birefnet(img).astype(bool)
+                        except Exception:
+                            print("refining with rembg")
+                            largest["segmentation"] = _refine_mask_with_rembg(img).astype(bool)
+                    h, w = img.shape[:2]
+                    total_pixels = h * w
+                    center_y, center_x = h // 2, w // 2
+                    for m in list(masks):
+                        seg = m["segmentation"]
+                        seg_resized = seg
+                        if seg.shape != (h, w):
+                            seg_resized = cv2.resize(
+                                seg.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST
+                            ).astype(bool)
+                        if np.count_nonzero(seg_resized) > 0.9 * total_pixels and not seg_resized[center_y, center_x]:
+                            inverse = m.copy()
+                            inverse["segmentation"] = np.logical_not(seg)
+                            masks.append(inverse)
                 save_masks(masks, img, base)
             processed.add(base)
             save_processed_set(processed)
