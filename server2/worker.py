@@ -20,9 +20,9 @@ except Exception:  # pragma: no cover - torch may not be installed
     _TORCH_AVAILABLE = False
     _REMBG_PROVIDERS = ["CPUExecutionProvider"]
 
-# Background removal sessions
-_REMBG_SESSION = new_session("u2net", providers=_REMBG_PROVIDERS)
+
 _BIRENET_SESSION = new_session("birefnet-dis", providers=_REMBG_PROVIDERS)
+
 
 # -------------------------
 # Config / directories
@@ -49,12 +49,14 @@ def _is_mostly_one_color(image_bgr: np.ndarray, mask: np.ndarray, threshold: flo
     pixels = image_bgr[mask > 0]
     if pixels.size == 0:
         return False
+    print("mostly 1 color")
     return float(pixels.std(axis=0).mean()) < threshold
 
 
 def _refine_mask_with_rembg(image_bgr: np.ndarray) -> np.ndarray:
     pil_img = Image.fromarray(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
-    result = remove(pil_img, session=_REMBG_SESSION)
+    print("running rembg remove")
+    result = remove(pil_img, session=_BIRENET_SESSION)
     alpha = np.array(result)[..., 3]
     return (alpha > 0).astype(np.uint8)
 
@@ -73,6 +75,27 @@ def _is_line_drawing(image_bgr: np.ndarray) -> bool:
     edges = cv2.Canny(gray, 50, 150)
     edge_ratio = float(np.count_nonzero(edges)) / edges.size
     color_std = float(image_bgr.std())
+    return edge_ratio > 0.05 and color_std < 25.0
+
+
+def _crop_with_mask(image_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray | None:
+    mask_u8 = (mask > 0).astype(np.uint8) * 255
+    coords = cv2.findNonZero(mask_u8)
+    if coords is None:
+        return None
+    x, y, w, h = cv2.boundingRect(coords)
+    bgra = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2BGRA)
+    bgra[:, :, 3] = mask_u8
+    return bgra[y:y+h, x:x+w]
+
+
+def _is_line_drawing(image_bgr: np.ndarray) -> bool:
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150)
+    edge_ratio = float(np.count_nonzero(edges)) / edges.size
+    color_std = float(image_bgr.std())
+    if edge_ratio > 0.05 and color_std < 25.0:
+         print("likely a line drawing")
     return edge_ratio > 0.05 and color_std < 25.0
 
 
@@ -257,6 +280,10 @@ while True:
                         try:
                             largest["segmentation"] = _refine_mask_with_birefnet(img).astype(bool)
                         except Exception:
+                            print("refining with birefnet")
+                            largest["segmentation"] = _refine_mask_with_birefnet(img).astype(bool)
+                        except Exception:
+                            print("refining with rembg")
                             largest["segmentation"] = _refine_mask_with_rembg(img).astype(bool)
                     h, w = img.shape[:2]
                     total_pixels = h * w
