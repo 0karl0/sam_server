@@ -51,6 +51,7 @@ def normalize_to_png_and_save(pil_img: Image.Image, out_path_png: str, longest_s
         img.thumbnail((longest_side, longest_side), Image.LANCZOS)
     img.save(out_path_png, "PNG")
 
+
 def load_crops_index() -> Dict[str, List[str]]:
     if os.path.exists(CROPS_INDEX):
         try:
