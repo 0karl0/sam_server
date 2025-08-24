@@ -51,54 +51,6 @@ def normalize_to_png_and_save(pil_img: Image.Image, out_path_png: str, longest_s
         img.thumbnail((longest_side, longest_side), Image.LANCZOS)
     img.save(out_path_png, "PNG")
 
-
-def detect_and_crop_sheet(pil_img: Image.Image) -> Image.Image:
-    """
-    Attempt to locate a sheet of paper in the image and return a cropped, top-down view.
-    If detection fails, returns the original image.
-    """
-    try:
-        img = np.array(pil_img)
-        bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray, (5, 5), 0)
-        edges = cv2.Canny(blur, 50, 150)
-
-        contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)
-        for cnt in contours[:5]:
-            peri = cv2.arcLength(cnt, True)
-            approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
-            if len(approx) == 4:
-                pts = approx.reshape(4, 2).astype("float32")
-
-                # order points: tl, tr, br, bl
-                s = pts.sum(axis=1)
-                diff = np.diff(pts, axis=1)
-                rect = np.zeros((4, 2), dtype="float32")
-                rect[0] = pts[np.argmin(s)]
-                rect[2] = pts[np.argmax(s)]
-                rect[1] = pts[np.argmin(diff)]
-                rect[3] = pts[np.argmax(diff)]
-
-                widthA = np.linalg.norm(rect[2] - rect[3])
-                widthB = np.linalg.norm(rect[1] - rect[0])
-                maxWidth = int(max(widthA, widthB))
-                heightA = np.linalg.norm(rect[1] - rect[2])
-                heightB = np.linalg.norm(rect[0] - rect[3])
-                maxHeight = int(max(heightA, heightB))
-
-                dst = np.array(
-                    [[0, 0], [maxWidth - 1, 0], [maxWidth - 1, maxHeight - 1], [0, maxHeight - 1]],
-                    dtype="float32",
-                )
-                M = cv2.getPerspectiveTransform(rect, dst)
-                warped = cv2.warpPerspective(bgr, M, (maxWidth, maxHeight))
-                return Image.fromarray(cv2.cvtColor(warped, cv2.COLOR_BGR2RGB))
-    except Exception:
-        pass
-    return pil_img
-
 def load_crops_index() -> Dict[str, List[str]]:
     if os.path.exists(CROPS_INDEX):
         try:
@@ -191,9 +143,6 @@ def upload():
         pil_img = Image.open(file.stream)
     except Exception as e:
         return f"Failed to open image: {e}", 400
-
-    # Step 1: detect sheet of paper and crop before further processing
-    pil_img = detect_and_crop_sheet(pil_img)
 
     # Normalize original to PNG in /input
     input_png = os.path.join(INPUT_DIR, f"{stem}.png")
