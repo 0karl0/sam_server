@@ -52,6 +52,53 @@ def normalize_to_png_and_save(pil_img: Image.Image, out_path_png: str, longest_s
     img.save(out_path_png, "PNG")
 
 
+def detect_paper_crop(bgr: np.ndarray) -> np.ndarray | None:
+    """Attempt to detect and perspective-crop a sheet of paper in the image."""
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blur, 75, 200)
+    edges = cv2.dilate(edges, None, iterations=2)
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    h, w = gray.shape
+    best = None
+    best_area = 0
+    for cnt in contours:
+        peri = cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+        if len(approx) != 4:
+            continue
+        area = cv2.contourArea(approx)
+        if area < 0.2 * w * h:
+            continue
+        mask = np.zeros_like(gray)
+        cv2.drawContours(mask, [approx], -1, 255, -1)
+        mean_val = cv2.mean(gray, mask=mask)[0]
+        if mean_val < 180:
+            continue
+        if area > best_area:
+            best_area = area
+            best = approx
+    if best is None:
+        return None
+    pts = best.reshape(4, 2).astype(np.float32)
+    s = pts.sum(axis=1)
+    diff = np.diff(pts, axis=1)
+    top_left = pts[np.argmin(s)]
+    bottom_right = pts[np.argmax(s)]
+    top_right = pts[np.argmin(diff)]
+    bottom_left = pts[np.argmax(diff)]
+    ordered = np.array([top_left, top_right, bottom_right, bottom_left], dtype=np.float32)
+    w1 = np.linalg.norm(bottom_right - bottom_left)
+    w2 = np.linalg.norm(top_right - top_left)
+    h1 = np.linalg.norm(top_right - bottom_right)
+    h2 = np.linalg.norm(top_left - bottom_left)
+    dst_w = int(max(w1, w2))
+    dst_h = int(max(h1, h2))
+    dst = np.array([[0, 0], [dst_w - 1, 0], [dst_w - 1, dst_h - 1], [0, dst_h - 1]], dtype=np.float32)
+    M = cv2.getPerspectiveTransform(ordered, dst)
+    return cv2.warpPerspective(bgr, M, (dst_w, dst_h))
+
+
 def load_crops_index() -> Dict[str, List[str]]:
     if os.path.exists(CROPS_INDEX):
         try:
@@ -145,7 +192,16 @@ def upload():
     except Exception as e:
         return f"Failed to open image: {e}", 400
 
-    # Normalize original to PNG in /input
+    # Detect and crop a sheet of paper if present
+    cv_img = cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2BGR)
+    paper_crop = detect_paper_crop(cv_img)
+    if paper_crop is not None:
+        print("Paper detection: cropped to sheet")
+        pil_img = Image.fromarray(cv2.cvtColor(paper_crop, cv2.COLOR_BGR2RGB))
+    else:
+        print("Paper detection: none found")
+
+    # Normalize original to PNG in /input (use cropped if available)
     input_png = os.path.join(INPUT_DIR, f"{stem}.png")
     normalize_to_png_and_save(pil_img, input_png, longest_side=None)  # keep original resolution
 

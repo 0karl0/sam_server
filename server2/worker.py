@@ -215,6 +215,7 @@ while True:
                 print("[Worker] Using SAM for segmentation")
                 masks, img = generate_masks(file_path, settings)
 
+
                 if masks:
                     largest = max(masks, key=lambda m: int(np.count_nonzero(m["segmentation"])))
                     if _is_mostly_one_color(img, largest["segmentation"]):
