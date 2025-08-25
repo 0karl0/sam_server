@@ -64,7 +64,7 @@ def _refine_mask_with_rembg(image_bgr: np.ndarray) -> np.ndarray:
     result = remove(pil_img, session=_REMBG_SESSION)
     alpha = np.array(result)[..., 3]
     print("[Decision] rembg remove complete")
-    return (alpha > 0).astype(np.uint8)
+    return (alpha.any() > 0).astype(np.uint8)
 
 
 def _refine_mask_with_birefnet(image_bgr: np.ndarray) -> np.ndarray:
