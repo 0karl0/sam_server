@@ -366,8 +366,16 @@ def list_crops():
 
 @app.route("/clear_all", methods=["POST"])
 def clear_all():
-    """Remove all processed images and trackers."""
-    dirs = [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR]
+    """Remove all inputs, outputs, thumbnails, and trackers."""
+    dirs = [
+        INPUT_DIR,
+        RESIZED_DIR,
+        MASKS_DIR,
+        CROPS_DIR,
+        SMALLS_DIR,
+        THUMBS_ORIG_DIR,
+        THUMBS_CLIP_DIR,
+    ]
     for d in dirs:
         for name in os.listdir(d):
             path = os.path.join(d, name)
