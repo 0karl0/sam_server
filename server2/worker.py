@@ -64,7 +64,7 @@ def main() -> None:
     while True:
         files = [f for f in os.listdir(RESIZED_DIR) if f.endswith((".png", ".jpg", ".jpeg"))]
         if not files:
-            print("[Worker] No pages found")
+            #print("[Worker] No pages found")
             time.sleep(2)
             continue
         processed = load_processed_set()
