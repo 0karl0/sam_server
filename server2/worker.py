@@ -353,6 +353,7 @@ def main() -> None:
                                         # and include the center pixel.
                                         continue
                                     inverse = m.copy()
+                                    print("at the logical")
                                     inverse["segmentation"] = np.logical_not(seg)
                                     filtered_masks.append(m)
                                     filtered_masks.append(inverse)
