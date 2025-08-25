@@ -22,6 +22,8 @@ RESIZED_DIR  = os.path.join(SHARED_DIR, "resized")            # ≤1024 for SAM
 MASKS_DIR    = os.path.join(SHARED_DIR, "output", "masks")    # from Server2
 CROPS_DIR    = os.path.join(SHARED_DIR, "output", "crops")    # RGBA crops
 SMALLS_DIR   = os.path.join(SHARED_DIR, "output", "smalls")
+THUMBS_ORIG_DIR = os.path.join(SHARED_DIR, "output", "thumbs", "originals")
+THUMBS_CLIP_DIR = os.path.join(SHARED_DIR, "output", "thumbs", "clippings")
 PROCESSED_FILE = os.path.join(SHARED_DIR, "output", "processed.json")
 CONFIG_DIR   = os.path.join(SHARED_DIR, "config")
 SETTINGS_JSON = os.path.join(CONFIG_DIR, "settings.json")
@@ -30,7 +32,16 @@ CROPS_INDEX   = os.path.join(CROPS_DIR, "index.json")         # manifest linking
 MAX_RESIZE = 1024  # longest side for SAM
 ALLOWED_EXT = {"png", "jpg", "jpeg", "webp", "bmp", "tiff", "heic", "heif"}
 
-for d in [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR, CONFIG_DIR]:
+for d in [
+    INPUT_DIR,
+    RESIZED_DIR,
+    MASKS_DIR,
+    CROPS_DIR,
+    SMALLS_DIR,
+    THUMBS_ORIG_DIR,
+    THUMBS_CLIP_DIR,
+    CONFIG_DIR,
+]:
     os.makedirs(d, exist_ok=True)
 
 # Register HEIF opener for Pillow
@@ -50,6 +61,21 @@ def normalize_to_png_and_save(pil_img: Image.Image, out_path_png: str, longest_s
     if longest_side and max(img.size) > longest_side:
         img.thumbnail((longest_side, longest_side), Image.LANCZOS)
     img.save(out_path_png, "PNG")
+
+
+def ensure_thumbnail(src_path: str, thumb_path: str, max_size: int = 256) -> None:
+    """Create a PNG thumbnail for ``src_path`` if ``thumb_path`` is missing or stale."""
+    if not os.path.exists(src_path):
+        return
+    try:
+        src_mtime = os.path.getmtime(src_path)
+        if os.path.exists(thumb_path) and os.path.getmtime(thumb_path) >= src_mtime:
+            return
+        with Image.open(src_path) as img:
+            img.thumbnail((max_size, max_size), Image.LANCZOS)
+            img.save(thumb_path, "PNG")
+    except Exception:
+        pass
 
 
 def detect_paper_crop(bgr: np.ndarray) -> np.ndarray | None:
@@ -217,6 +243,16 @@ def upload():
 def serve_input(filename):
     return send_from_directory(INPUT_DIR, filename)
 
+
+@app.route("/thumbs/originals/<path:filename>", methods=["GET"])
+def serve_original_thumb(filename):
+    return send_from_directory(THUMBS_ORIG_DIR, filename)
+
+
+@app.route("/thumbs/clippings/<path:filename>", methods=["GET"])
+def serve_clipping_thumb(filename):
+    return send_from_directory(THUMBS_CLIP_DIR, filename)
+
 # Albums: originals (from /input) + their crops (from crops index)
 @app.route("/list_originals", methods=["GET"])
 def list_originals():
@@ -241,10 +277,16 @@ def list_originals():
     for f in sorted(os.listdir(INPUT_DIR)):
         if not f.lower().endswith(".png"):
             continue
+        src_path = os.path.join(INPUT_DIR, f)
+        thumb_path = os.path.join(THUMBS_ORIG_DIR, f)
+        ensure_thumbnail(src_path, thumb_path)
+
         crop_files = index.get(f, [])
         crops = []
         for c in crop_files:
             crop_path = os.path.join(CROPS_DIR, c)
+            crop_thumb_path = os.path.join(THUMBS_CLIP_DIR, c)
+            ensure_thumbnail(crop_path, crop_thumb_path)
             area = 0
             try:
                 img = cv2.imread(crop_path, cv2.IMREAD_UNCHANGED)
@@ -253,11 +295,17 @@ def list_originals():
                     area = int(h * w)
             except Exception:
                 pass
-            crops.append({"file": c, "url": f"/crops/{c}", "area": area})
+            crops.append({
+                "file": c,
+                "url": f"/crops/{c}",
+                "thumb_url": f"/thumbs/clippings/{c}",
+                "area": area,
+            })
         albums.append({
             "original": f,
             "original_url": f"/input/{f}",
-            "crops": crops
+            "original_thumb_url": f"/thumbs/originals/{f}",
+            "crops": crops,
         })
 
     return jsonify(albums)

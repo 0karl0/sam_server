@@ -294,7 +294,7 @@
         head.className="albumHead"; head.dataset.original = a.original;
         const isOpen = !!openState[a.original]; const arrow = isOpen ? "▲" : "▼";
         head.innerHTML = `
-          <img class="thumb" src="${a.original_url}" alt="">
+          <img class="thumb" src="${a.original_thumb_url}" alt="">
           <div class="meta">
             <b>${a.original}</b>
             <span>${a.crops.length} clipping${a.crops.length===1?"":"s"}</span>
@@ -312,7 +312,7 @@
         }else{
           a.crops.forEach(c=>{
             const chip=document.createElement("div"); chip.className="chip";
-            const img=document.createElement("img"); img.src=c.url; img.alt=c.file; img.title="Add to canvas";
+            const img=document.createElement("img"); img.src=c.thumb_url; img.alt=c.file; img.title="Add to canvas";
             img.onclick=()=> addToCanvas(c.url);
             chip.appendChild(img); chips.appendChild(chip);
           });
