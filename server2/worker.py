@@ -88,6 +88,7 @@ def _is_line_drawing(image_bgr: np.ndarray) -> bool:
 
 def _is_mostly_one_color(image_bgr: np.ndarray, mask: np.ndarray, std_thresh: float = 5.0) -> bool:
     """Return True if the region defined by mask has little color variation."""
+    mask = np.squeeze(mask)
     if mask.shape != image_bgr.shape[:2]:
         mask = cv2.resize(
             mask.astype(np.uint8),
@@ -106,7 +107,7 @@ def _is_mostly_one_color(image_bgr: np.ndarray, mask: np.ndarray, std_thresh: fl
 
 
 def _crop_with_mask(image_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray | None:
-    mask_u8 = (mask > 0).astype(np.uint8) * 255
+    mask_u8 = (np.squeeze(mask) > 0).astype(np.uint8) * 255
     coords = cv2.findNonZero(mask_u8)
     if coords is None:
         return None
@@ -230,19 +231,24 @@ def save_masks(masks, image, base_name):
     big_idx = 0
     small_idx = 0
     for m in masks:
-        seg = m["segmentation"].astype(np.uint8)
+        seg = np.squeeze(m["segmentation"]).astype(np.uint8)
         if seg.shape != (h, w):
             seg = cv2.resize(seg, (w, h), interpolation=cv2.INTER_NEAREST)
 
         area = int(seg.sum())
         out = seg * 255
         if area < AREA_THRESH:
-            out_path = os.path.join(SMALLS_DIR, f"{base_name}_small{small_idx}.png")
+            mask_path = os.path.join(SMALLS_DIR, f"{base_name}_small{small_idx}.png")
+            crop_path = os.path.join(CROPS_DIR, f"{base_name}_small{small_idx}.png")
             small_idx += 1
         else:
-            out_path = os.path.join(MASKS_DIR, f"{base_name}_mask{big_idx}.png")
+            mask_path = os.path.join(MASKS_DIR, f"{base_name}_mask{big_idx}.png")
+            crop_path = os.path.join(CROPS_DIR, f"{base_name}_mask{big_idx}.png")
             big_idx += 1
-        cv2.imwrite(out_path, out)
+        cv2.imwrite(mask_path, out)
+        crop = _crop_with_mask(image, seg)
+        if crop is not None:
+            cv2.imwrite(crop_path, crop)
 
 # -------------------------
 # Watcher loop
@@ -309,7 +315,7 @@ while True:
                         total_pixels = h * w
                         center_y, center_x = h // 2, w // 2
                         for m in list(masks):
-                            seg = m["segmentation"]
+                            seg = np.squeeze(m["segmentation"]).astype(bool)
                             seg_resized = seg
                             if seg.shape != (h, w):
                                 seg_resized = cv2.resize(
@@ -317,7 +323,7 @@ while True:
                                 ).astype(bool)
                             area = np.count_nonzero(seg_resized)
                             if area > 0.9 * total_pixels:
-                                if seg_resized[center_y, center_x]:
+                                if np.any(seg_resized[center_y, center_x]):
                                     masks.remove(m)
                                     continue
                                 inverse = m.copy()
