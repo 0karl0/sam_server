@@ -20,10 +20,6 @@ except Exception:  # pragma: no cover - torch may not be installed
     _TORCH_AVAILABLE = False
     _REMBG_PROVIDERS = ["CPUExecutionProvider"]
 
-# Rembg does not ship a model named "dis". Use the default "u2net" model
-# to avoid runtime errors when initializing the background removal session.
-_REMBG_SESSION = new_session("birefnet-dis", providers=_REMBG_PROVIDERS)
-
 # -------------------------
 # Config / directories
 # -------------------------
@@ -39,6 +35,14 @@ PROCESSED_FILE = os.path.join(SHARED_DIR, "output", "processed.json")
 AREA_THRESH = 1000  # pixel area below which masks are treated as "smalls"
 MERGE_KERNEL = np.ones((5, 5), np.uint8)  # kernel for merging nearby masks
 
+# Load BirefNet session from the shared models directory if available to avoid
+# downloading the model at runtime.
+_BIREFNET_MODEL = os.path.join(SHARED_DIR, "models", "birefnet-dis.onnx")
+_REMBG_SESSION = new_session(
+    _BIREFNET_MODEL if os.path.exists(_BIREFNET_MODEL) else "birefnet-dis",
+    providers=_REMBG_PROVIDERS,
+)
+
 
 os.makedirs(MASKS_DIR, exist_ok=True)
 os.makedirs(SMALLS_DIR, exist_ok=True)
@@ -51,6 +55,16 @@ def _refine_mask_with_rembg(image_bgr: np.ndarray) -> np.ndarray:
     result = remove(pil_img, session=_REMBG_SESSION)
     alpha = np.array(result)[..., 3]
     return (alpha > 0).astype(np.uint8)
+
+
+def _refine_mask_with_birefnet(image_bgr: np.ndarray) -> np.ndarray:
+    """Refine mask using the BirefNet session.
+
+    This simply delegates to rembg with the preloaded BirefNet model. A
+    separate helper makes it easy to catch errors and fall back to the generic
+    rembg model if needed.
+    """
+    return _refine_mask_with_rembg(image_bgr)
 
 
 def _is_line_drawing(image_bgr: np.ndarray) -> bool:
