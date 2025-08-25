@@ -48,6 +48,7 @@ os.environ.setdefault("U2NET_HOME", os.path.join(SHARED_DIR, "models"))
 _REMBG_SESSION = new_session("birefnet-dis", providers=_REMBG_PROVIDERS)
 
 
+os.makedirs(RESIZED_DIR, exist_ok=True)
 os.makedirs(MASKS_DIR, exist_ok=True)
 os.makedirs(SMALLS_DIR, exist_ok=True)
 os.makedirs(CROPS_DIR, exist_ok=True)
