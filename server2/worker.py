@@ -10,7 +10,7 @@ from rembg import remove, new_session
 
 try:
     import torch  # type: ignore
-    print("importing torch)
+    print("importing torch")
     _TORCH_AVAILABLE = True
     _REMBG_PROVIDERS = [
         "CUDAExecutionProvider",
