@@ -51,9 +51,10 @@ os.makedirs(CROPS_DIR, exist_ok=True)
 
 def _refine_mask_with_rembg(image_bgr: np.ndarray) -> np.ndarray:
     pil_img = Image.fromarray(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
-    print("running rembg remove")
+    print("[Decision] running rembg remove")
     result = remove(pil_img, session=_REMBG_SESSION)
     alpha = np.array(result)[..., 3]
+    print("[Decision] rembg remove complete")
     return (alpha > 0).astype(np.uint8)
 
 
@@ -72,9 +73,11 @@ def _is_line_drawing(image_bgr: np.ndarray) -> bool:
     edges = cv2.Canny(gray, 50, 150)
     edge_ratio = float(np.count_nonzero(edges)) / edges.size
     color_std = float(image_bgr.std())
-    if edge_ratio > 0.05 and color_std < 25.0:
-         print("likely a line drawing")
-    return edge_ratio > 0.05 and color_std < 25.0
+    result = edge_ratio > 0.05 and color_std < 25.0
+    print(
+        f"[Decision] _is_line_drawing: edge_ratio={edge_ratio:.4f}, color_std={color_std:.2f} -> {result}"
+    )
+    return result
 
 
 def _is_mostly_one_color(image_bgr: np.ndarray, mask: np.ndarray, std_thresh: float = 5.0) -> bool:
@@ -88,7 +91,12 @@ def _is_mostly_one_color(image_bgr: np.ndarray, mask: np.ndarray, std_thresh: fl
     masked_pixels = image_bgr[mask.astype(bool)]
     if masked_pixels.size == 0:
         return False
-    return float(masked_pixels.std()) < std_thresh
+    std = float(masked_pixels.std())
+    result = std < std_thresh
+    print(
+        f"[Decision] _is_mostly_one_color: std={std:.2f}, thresh={std_thresh} -> {result}"
+    )
+    return result
 
 
 def _crop_with_mask(image_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray | None:
@@ -215,9 +223,13 @@ processed = load_processed_set()
 
 while True:
     settings = load_settings()
-    for f in os.listdir(RESIZED_DIR):
-        if not f.endswith((".png", ".jpg", ".jpeg")):
-            continue
+    files = [f for f in os.listdir(RESIZED_DIR) if f.endswith((".png", ".jpg", ".jpeg"))]
+    if not files:
+        print("[Worker] No pages found")
+        time.sleep(2)
+        continue
+    print(f"[Worker] Found {len(files)} page(s): {files}")
+    for f in files:
         base = os.path.splitext(f)[0]
         if base in processed:
             continue
