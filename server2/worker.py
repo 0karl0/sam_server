@@ -46,6 +46,16 @@ def _detect_pages(image_bgr: np.ndarray) -> list[np.ndarray]:
     return pages
 
 
+def _resize_to_max(image: np.ndarray, max_side: int = 1024) -> np.ndarray:
+    """Resize ``image`` so the longest side is ``max_side`` or smaller."""
+    h, w = image.shape[:2]
+    scale = min(max_side / float(max(h, w)), 1.0)
+    if scale < 1.0:
+        new_size = (int(w * scale), int(h * scale))
+        return cv2.resize(image, new_size, interpolation=cv2.INTER_AREA)
+    return image
+
+
 def load_processed_set():
     """Return set of base names already present in the pages directory."""
     processed = set()
@@ -83,7 +93,11 @@ def main() -> None:
                 if len(page_masks) == 0:
                     print(f"[Worker] No pages detected in {f}; moving original")
                     out_path = os.path.join(PAGES_DIR, f)
+                    # Move the original file to pages directory
                     os.replace(file_path, out_path)
+                    # Ensure a resized copy is available for downstream workers
+                    resized_img = _resize_to_max(img)
+                    cv2.imwrite(os.path.join(RESIZED_DIR, f), resized_img)
                 else:
                     print(f"[Worker] Detected {len(page_masks)} page(s) in {f}")
                     combined = np.zeros(img.shape[:2], dtype=np.uint8)
@@ -93,6 +107,9 @@ def main() -> None:
                     bgra[:, :, 3] = combined
                     out_path = os.path.join(PAGES_DIR, f)
                     cv2.imwrite(out_path, bgra)
+                    # Save resized copy for further processing
+                    resized_bgra = _resize_to_max(bgra)
+                    cv2.imwrite(os.path.join(RESIZED_DIR, f), resized_bgra)
                     os.remove(file_path)
                 processed.add(base)
                 end = time.process_time()
