@@ -10,12 +10,14 @@ from rembg import remove, new_session
 
 try:
     import torch  # type: ignore
+    print("importing torch)
     _TORCH_AVAILABLE = True
     _REMBG_PROVIDERS = [
         "CUDAExecutionProvider",
         "CPUExecutionProvider",
     ] if torch.cuda.is_available() else ["CPUExecutionProvider"]
 except Exception:  # pragma: no cover - torch may not be installed
+    print("couldn't import torch")
     torch = None  # type: ignore
     _TORCH_AVAILABLE = False
     _REMBG_PROVIDERS = ["CPUExecutionProvider"]
@@ -67,6 +69,7 @@ def _refine_mask_with_birefnet(image_bgr: np.ndarray) -> np.ndarray:
     separate helper makes it easy to catch errors and fall back to the generic
     rembg model if needed.
     """
+    print("birefnet")
     return _refine_mask_with_rembg(image_bgr)
 
 
@@ -163,6 +166,7 @@ def load_settings():
 
 def generate_masks(image_path, settings):
     """Generate masks for a single image."""
+    print("using sam")
     image = cv2.imread(image_path)
     if image is None:
         return []
