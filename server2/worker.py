@@ -338,7 +338,8 @@ def main() -> None:
                             h, w = page_img.shape[:2]
                             total_pixels = h * w
                             center_y, center_x = h // 2, w // 2
-                            for m in list(masks):
+                            filtered_masks = []
+                            for m in masks:
                                 seg = np.squeeze(m["segmentation"]).astype(bool)
                                 seg_resized = seg
                                 if seg.shape != (h, w):
@@ -348,11 +349,16 @@ def main() -> None:
                                 area = np.count_nonzero(seg_resized)
                                 if area > 0.9 * total_pixels:
                                     if np.any(seg_resized[center_y, center_x]):
-                                        masks.remove(m)
+                                        # Drop masks that cover almost the entire image
+                                        # and include the center pixel.
                                         continue
                                     inverse = m.copy()
                                     inverse["segmentation"] = np.logical_not(seg)
-                                    masks.append(inverse)
+                                    filtered_masks.append(m)
+                                    filtered_masks.append(inverse)
+                                else:
+                                    filtered_masks.append(m)
+                            masks = filtered_masks
                         save_masks(masks, page_img, page_base)
                 processed.add(base)
                 save_processed_set(processed)
