@@ -51,7 +51,7 @@
   #floatingControls {
     position: absolute;
     right: 20px;
-    bottom: 20px;
+    top: 20px;
     z-index: 100;
     display: flex;
     gap: 8px;
@@ -136,14 +136,12 @@
     <!-- RIGHT: Canvas -->
     <section class="card canvasWrap">
       <div id="canvasToolbar">
-        <button class="btn" id="zoomIn">Zoom +</button>
-        <button class="btn" id="zoomOut">Zoom −</button>
-        <button class="btn ghost" id="fit">Fit</button>
         <button class="btn ghost" id="clear">Clear</button>
         <button class="btn ghost" id="toFront">Bring to Front</button>
         <button class="btn ghost" id="toBack">Send to Back</button>
         <button class="btn ghost" id="stepForward">Step Forward</button>
         <button class="btn ghost" id="stepBackward">Step Backward</button>
+        <button class="btn ghost" id="removeSelected">Remove Selected</button>
 <label>Canvas Size (in)
   <input type="number" id="canvasWidthIn" min="1" max="50" value="20" style="width:60px"> ×
   <input type="number" id="canvasHeightIn" min="1" max="50" value="20" style="width:60px">
@@ -313,7 +311,7 @@
           a.crops.forEach(c=>{
             const chip=document.createElement("div"); chip.className="chip";
             const img=document.createElement("img"); img.src=c.thumb_url; img.alt=c.file; img.title="Add to canvas";
-            img.onclick=()=> addToCanvas(c.url);
+            img.onclick=()=> addToCanvas(c.url, a.original);
             chip.appendChild(img); chips.appendChild(chip);
           });
         }
@@ -366,6 +364,7 @@
   stage.on("click tap", (e)=>{ if(e.target===stage) selectNode(null); });
 
   const autoAdded = new Set();
+  const groupCenters = {};
 
   function placeImageOnCanvas(img, x, y){
     const node = new Konva.Image({
@@ -378,9 +377,9 @@
     node.moveToTop();
     node.on("click tap", ()=> selectNode(node));
     node.on("transformend", ()=>{
-      const sx=node.scaleX(), sy=node.scaleY();
-      node.width(Math.max(1, node.width()*sx));
-      node.height(Math.max(1, node.height()*sy));
+      const scale = node.scaleX();
+      node.width(Math.max(1, node.width()*scale));
+      node.height(Math.max(1, node.height()*scale));
       node.scale({x:1,y:1});
       layer.batchDraw();
     });
@@ -388,21 +387,26 @@
   }
 
   // ---------- Add image at actual pixel size ----------
-  function addToCanvas(url){
+  function addToCanvas(url, group){
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = function(){
-      placeImageOnCanvas(img, stage.width()/2 - img.width/2, stage.height()/2 - img.height/2);
-    };
-    img.src = url;
-  }
-
-  function addToCanvasRandom(url){
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = function(){
-      const x = Math.random() * Math.max(0, stage.width() - img.width);
-      const y = Math.random() * Math.max(0, stage.height() - img.height);
+      let x = 0, y = 0;
+      if (group){
+        if(!groupCenters[group]){
+          groupCenters[group] = {
+            x: Math.random() * Math.max(0, stage.width() - img.width),
+            y: Math.random() * Math.max(0, stage.height() - img.height)
+          };
+        }
+        const spread = 40;
+        const base = groupCenters[group];
+        x = base.x + (Math.random()*spread - spread/2);
+        y = base.y + (Math.random()*spread - spread/2);
+      }else{
+        x = Math.random() * Math.max(0, stage.width() - img.width);
+        y = Math.random() * Math.max(0, stage.height() - img.height);
+      }
       placeImageOnCanvas(img, x, y);
     };
     img.src = url;
@@ -414,7 +418,7 @@
       const sorted=[...a.crops].sort((a,b)=> (b.area||0)-(a.area||0));
       sorted.slice(0,3).forEach(c=>{
         if(!autoAdded.has(c.file)){
-          addToCanvasRandom(c.url);
+          addToCanvas(c.url, a.original);
           autoAdded.add(c.file);
         }
       });
@@ -604,6 +608,21 @@
   document.getElementById("toBack")?.addEventListener("click",  ()=> withSelected(n=> n.moveToBottom()));
   document.getElementById("stepForward")?.addEventListener("click", ()=> withSelected(n=> n.moveUp()));
   document.getElementById("stepBackward")?.addEventListener("click",()=> withSelected(n=> n.moveDown()));
+  document.getElementById("removeSelected")?.addEventListener("click", ()=> withSelected(n=>{ n.destroy(); selectNode(null); }));
+  document.getElementById("clear")?.addEventListener("click", ()=>{
+    layer.destroyChildren();
+    layer.add(tr);
+    selectNode(null);
+    for(const k in groupCenters){ delete groupCenters[k]; }
+    layer.batchDraw();
+  });
+  window.addEventListener("keydown", e=>{
+    if((e.key === "Delete" || e.key === "Backspace") && selectedNode){
+      selectedNode.destroy();
+      selectNode(null);
+      layer.batchDraw();
+    }
+  });
   document.getElementById("download")?.addEventListener("click", ()=>{
     const dataURL = stage.toDataURL({ pixelRatio: 2 });
     const a = document.createElement("a"); a.href=dataURL; a.download="canvas.png"; a.click();
