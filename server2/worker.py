@@ -1,12 +1,8 @@
 import os
 import time
 import json
-import cv2
 import gc
-import numpy as np
-from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
-from PIL import Image
-from rembg import remove, new_session
+import argparse
 
 try:
     import torch  # type: ignore
@@ -37,23 +33,28 @@ PROCESSED_FILE = os.path.join(SHARED_DIR, "output", "processed.json")
 
 AREA_THRESH = 1000  # pixel area below which masks are treated as "smalls"
 
-# Load BirefNet session from the shared models directory.
-#
-# ``rembg`` looks for downloaded model weights inside the directory pointed to
-# the ``U2NET_HOME`` environment variable.  If the file already exists, it will
-# be used directly and no network call is made.  By setting ``U2NET_HOME`` to
-# our shared models directory, we ensure the pre-downloaded
-# ``birefnet-dis.onnx`` file is picked up automatically.
-os.environ.setdefault("U2NET_HOME", os.path.join(SHARED_DIR, "models"))
-_REMBG_SESSION = new_session("birefnet-dis", providers=_REMBG_PROVIDERS)
+# Global placeholders for heavy dependencies loaded lazily
+sam = None
+_REMBG_SESSION = None
 
 
-os.makedirs(RESIZED_DIR, exist_ok=True)
-os.makedirs(MASKS_DIR, exist_ok=True)
-os.makedirs(SMALLS_DIR, exist_ok=True)
-os.makedirs(CROPS_DIR, exist_ok=True)
-os.makedirs(PAGES_DIR, exist_ok=True)
+def _lazy_load_dependencies():
+    global cv2, np, sam_model_registry, SamAutomaticMaskGenerator
+    global Image, remove, new_session, _REMBG_SESSION, sam
 
+    import cv2
+    import numpy as np
+    from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
+    from PIL import Image
+    from rembg import remove, new_session
+
+    # Load BirefNet session from the shared models directory.
+    os.environ.setdefault("U2NET_HOME", os.path.join(SHARED_DIR, "models"))
+    _REMBG_SESSION = new_session("birefnet-dis", providers=_REMBG_PROVIDERS)
+
+    # Load SAM model (CPU-only)
+    sam = sam_model_registry["vit_l"](checkpoint=MODEL_PATH)
+    sam.to("cpu")
 
 def _refine_mask_with_rembg(image_bgr: np.ndarray) -> np.ndarray:
     pil_img = Image.fromarray(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
@@ -178,12 +179,6 @@ def save_processed_set(processed_set):
     os.replace(tmp, PROCESSED_FILE)
 
 # -------------------------
-# Load SAM model
-# -------------------------
-sam = sam_model_registry["vit_l"](checkpoint=MODEL_PATH)
-sam.to("cpu")  # CPU-only
-
-# -------------------------
 # Helper functions
 # -------------------------
 def load_settings():
@@ -255,88 +250,118 @@ def save_masks(masks, image, base_name):
 # Watcher loop
 # -------------------------
 
-while True:
-    settings = load_settings()
-    processed = load_processed_set()
-    files = [f for f in os.listdir(RESIZED_DIR) if f.endswith((".png", ".jpg", ".jpeg"))]
-    if not files:
-        print("[Worker] No pages found")
-        time.sleep(2)
-        continue
-    #print(f"[Worker] Found {len(files)} page(s): {files}")
-    for f in files:
-        base = os.path.splitext(f)[0]
-        if base in processed:
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--preload",
+        action="store_true",
+        help="Load heavy dependencies at startup instead of waiting for work",
+    )
+    args = parser.parse_args()
+
+    os.makedirs(RESIZED_DIR, exist_ok=True)
+    os.makedirs(MASKS_DIR, exist_ok=True)
+    os.makedirs(SMALLS_DIR, exist_ok=True)
+    os.makedirs(CROPS_DIR, exist_ok=True)
+    os.makedirs(PAGES_DIR, exist_ok=True)
+
+    deps_loaded = False
+    if args.preload:
+        _lazy_load_dependencies()
+        deps_loaded = True
+
+    while True:
+        files = [f for f in os.listdir(RESIZED_DIR) if f.endswith((".png", ".jpg", ".jpeg"))]
+        if not files:
+            print("[Worker] No pages found")
+            time.sleep(2)
             continue
-        file_path = os.path.join(RESIZED_DIR, f)
-        start = time.process_time()
-        print(f"[Worker] Processing {f} ...")
-        try:
-            img = cv2.imread(file_path)
-            if img is None:
+        if not deps_loaded:
+            _lazy_load_dependencies()
+            deps_loaded = True
+        settings = load_settings()
+        processed = load_processed_set()
+        for f in files:
+            base = os.path.splitext(f)[0]
+            if base in processed:
                 continue
-            page_masks = _detect_pages(img)
-            if not page_masks:
-                print(f"[Worker] No pages detected in {f}")
+            file_path = os.path.join(RESIZED_DIR, f)
+            start = time.process_time()
+            print(f"[Worker] Processing {f} ...")
+            try:
+                img = cv2.imread(file_path)
+                if img is None:
+                    continue
+                page_masks = _detect_pages(img)
+                if len(page_masks) == 0:
+                    print(f"[Worker] No pages detected in {f}")
+                    processed.add(base)
+                    save_processed_set(processed)
+                    continue
+                print(f"[Worker] Detected {len(page_masks)} page(s) in {f}")
+                for idx, page_mask in enumerate(page_masks):
+                    page_base = f"{base}_page{idx}"
+                    crop = _crop_with_mask(img, page_mask)
+                    if crop is None:
+                        continue
+                    page_path = os.path.join(PAGES_DIR, f"{page_base}.png")
+                    cv2.imwrite(page_path, crop)
+                    page_img = cv2.cvtColor(crop, cv2.COLOR_BGRA2BGR)
+                    if _is_line_drawing(page_img):
+                        print(f"[Worker] {page_base}: Using rembg for line drawing")
+                        mask = _refine_mask_with_rembg(page_img)
+                        mask_file = os.path.join(MASKS_DIR, f"{page_base}_mask0.png")
+                        cv2.imwrite(mask_file, mask.astype(np.uint8) * 255)
+                        crop_file = os.path.join(CROPS_DIR, f"{page_base}_mask0.png")
+                        crop_refined = _crop_with_mask(page_img, mask)
+                        if crop_refined is None:
+                            crop_refined = crop
+                        cv2.imwrite(crop_file, crop_refined)
+                    else:
+                        print(f"[Worker] {page_base}: Using SAM for segmentation")
+                        masks, page_img = generate_masks(page_img, settings)
+                        if len(masks) > 0:
+                            largest = max(
+                                masks,
+                                key=lambda m: int(np.count_nonzero(m["segmentation"]))
+                            )
+                            if _is_mostly_one_color(page_img, largest["segmentation"]):
+                                try:
+                                    print("refining with birefnet")
+                                    largest["segmentation"] = _refine_mask_with_birefnet(page_img).astype(bool)
+                                except Exception:
+                                    print("refining with rembg")
+                                    largest["segmentation"] = _refine_mask_with_rembg(page_img).astype(bool)
+                            h, w = page_img.shape[:2]
+                            total_pixels = h * w
+                            center_y, center_x = h // 2, w // 2
+                            for m in list(masks):
+                                seg = np.squeeze(m["segmentation"]).astype(bool)
+                                seg_resized = seg
+                                if seg.shape != (h, w):
+                                    seg_resized = cv2.resize(
+                                        seg.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST
+                                    ).astype(bool)
+                                area = np.count_nonzero(seg_resized)
+                                if area > 0.9 * total_pixels:
+                                    if np.any(seg_resized[center_y, center_x]):
+                                        masks.remove(m)
+                                        continue
+                                    inverse = m.copy()
+                                    inverse["segmentation"] = np.logical_not(seg)
+                                    masks.append(inverse)
+                        save_masks(masks, page_img, page_base)
                 processed.add(base)
                 save_processed_set(processed)
-                continue
-            print(f"[Worker] Detected {len(page_masks)} page(s) in {f}")
-            for idx, page_mask in enumerate(page_masks):
-                page_base = f"{base}_page{idx}"
-                crop = _crop_with_mask(img, page_mask)
-                if crop is None:
-                    continue
-                page_path = os.path.join(PAGES_DIR, f"{page_base}.png")
-                cv2.imwrite(page_path, crop)
-                page_img = cv2.cvtColor(crop, cv2.COLOR_BGRA2BGR)
-                if _is_line_drawing(page_img):
-                    print(f"[Worker] {page_base}: Using rembg for line drawing")
-                    mask = _refine_mask_with_rembg(page_img)
-                    mask_file = os.path.join(MASKS_DIR, f"{page_base}_mask0.png")
-                    cv2.imwrite(mask_file, mask.astype(np.uint8) * 255)
-                    crop_file = os.path.join(CROPS_DIR, f"{page_base}_mask0.png")
-                    crop_refined = _crop_with_mask(page_img, mask)
-                    if crop_refined is None:
-                        crop_refined = crop
-                    cv2.imwrite(crop_file, crop_refined)
-                else:
-                    print(f"[Worker] {page_base}: Using SAM for segmentation")
-                    masks, page_img = generate_masks(page_img, settings)
-                    if masks:
-                        largest = max(masks, key=lambda m: int(np.count_nonzero(m["segmentation"])))
-                        if _is_mostly_one_color(page_img, largest["segmentation"]):
-                            try:
-                                print("refining with birefnet")
-                                largest["segmentation"] = _refine_mask_with_birefnet(page_img).astype(bool)
-                            except Exception:
-                                print("refining with rembg")
-                                largest["segmentation"] = _refine_mask_with_rembg(page_img).astype(bool)
-                        h, w = page_img.shape[:2]
-                        total_pixels = h * w
-                        center_y, center_x = h // 2, w // 2
-                        for m in list(masks):
-                            seg = np.squeeze(m["segmentation"]).astype(bool)
-                            seg_resized = seg
-                            if seg.shape != (h, w):
-                                seg_resized = cv2.resize(
-                                    seg.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST
-                                ).astype(bool)
-                            area = np.count_nonzero(seg_resized)
-                            if area > 0.9 * total_pixels:
-                                if np.any(seg_resized[center_y, center_x]):
-                                    masks.remove(m)
-                                    continue
-                                inverse = m.copy()
-                                inverse["segmentation"] = np.logical_not(seg)
-                                masks.append(inverse)
-                    save_masks(masks, page_img, page_base)
-            processed.add(base)
-            save_processed_set(processed)
-            gc.collect()
-            end = time.process_time()
-            total = end - start
-            print(f'elapsed time: {total:.6f} seconds')
-        except Exception as e:
-            print(f"[Worker] Error processing {f}: {e}")
-    time.sleep(2)
+                gc.collect()
+                end = time.process_time()
+                total = end - start
+                print(f"elapsed time: {total:.6f} seconds")
+            except Exception as e:
+                print(f"[Worker] Error processing {f}: {e}")
+        time.sleep(2)
+
+
+if __name__ == "__main__":
+    main()
