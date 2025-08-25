@@ -35,13 +35,15 @@ PROCESSED_FILE = os.path.join(SHARED_DIR, "output", "processed.json")
 AREA_THRESH = 1000  # pixel area below which masks are treated as "smalls"
 MERGE_KERNEL = np.ones((5, 5), np.uint8)  # kernel for merging nearby masks
 
-# Load BirefNet session from the shared models directory if available to avoid
-# downloading the model at runtime.
-_BIREFNET_MODEL = os.path.join(SHARED_DIR, "models", "birefnet-dis.onnx")
-_REMBG_SESSION = new_session(
-    _BIREFNET_MODEL if os.path.exists(_BIREFNET_MODEL) else "birefnet-dis",
-    providers=_REMBG_PROVIDERS,
-)
+# Load BirefNet session from the shared models directory.
+#
+# ``rembg`` looks for downloaded model weights inside the directory pointed to
+# the ``U2NET_HOME`` environment variable.  If the file already exists, it will
+# be used directly and no network call is made.  By setting ``U2NET_HOME`` to
+# our shared models directory, we ensure the pre-downloaded
+# ``birefnet-dis.onnx`` file is picked up automatically.
+os.environ.setdefault("U2NET_HOME", os.path.join(SHARED_DIR, "models"))
+_REMBG_SESSION = new_session("birefnet-dis", providers=_REMBG_PROVIDERS)
 
 
 os.makedirs(MASKS_DIR, exist_ok=True)
