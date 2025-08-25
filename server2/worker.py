@@ -263,7 +263,7 @@ while True:
         print("[Worker] No pages found")
         time.sleep(2)
         continue
-    print(f"[Worker] Found {len(files)} page(s): {files}")
+    #print(f"[Worker] Found {len(files)} page(s): {files}")
     for f in files:
         base = os.path.splitext(f)[0]
         if base in processed:
