@@ -253,10 +253,10 @@ def save_masks(masks, image, base_name):
 # -------------------------
 # Watcher loop
 # -------------------------
-processed = load_processed_set()
 
 while True:
     settings = load_settings()
+    processed = load_processed_set()
     files = [f for f in os.listdir(RESIZED_DIR) if f.endswith((".png", ".jpg", ".jpeg"))]
     if not files:
         print("[Worker] No pages found")
