@@ -63,6 +63,20 @@ def _is_line_drawing(image_bgr: np.ndarray) -> bool:
     return edge_ratio > 0.05 and color_std < 25.0
 
 
+def _is_mostly_one_color(image_bgr: np.ndarray, mask: np.ndarray, std_thresh: float = 5.0) -> bool:
+    """Return True if the region defined by mask has little color variation."""
+    if mask.shape != image_bgr.shape[:2]:
+        mask = cv2.resize(
+            mask.astype(np.uint8),
+            (image_bgr.shape[1], image_bgr.shape[0]),
+            interpolation=cv2.INTER_NEAREST,
+        )
+    masked_pixels = image_bgr[mask.astype(bool)]
+    if masked_pixels.size == 0:
+        return False
+    return float(masked_pixels.std()) < std_thresh
+
+
 def _crop_with_mask(image_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray | None:
     mask_u8 = (mask > 0).astype(np.uint8) * 255
     coords = cv2.findNonZero(mask_u8)
@@ -235,7 +249,11 @@ while True:
                             seg_resized = cv2.resize(
                                 seg.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST
                             ).astype(bool)
-                        if np.count_nonzero(seg_resized) > 0.9 * total_pixels and not seg_resized[center_y, center_x]:
+                        area = np.count_nonzero(seg_resized)
+                        if area > 0.9 * total_pixels:
+                            if seg_resized[center_y, center_x]:
+                                masks.remove(m)
+                                continue
                             inverse = m.copy()
                             inverse["segmentation"] = np.logical_not(seg)
                             masks.append(inverse)
