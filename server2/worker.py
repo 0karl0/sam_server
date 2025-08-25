@@ -3,6 +3,10 @@ import time
 import json
 import gc
 import argparse
+import cv2
+import numpy as np
+from PIL import Image
+from rembg import remove, new_session
 
 try:
     import torch  # type: ignore
@@ -42,11 +46,9 @@ def _lazy_load_dependencies():
     global cv2, np, sam_model_registry, SamAutomaticMaskGenerator
     global Image, remove, new_session, _REMBG_SESSION, sam
 
-    import cv2
-    import numpy as np
+
     from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
-    from PIL import Image
-    from rembg import remove, new_session
+
 
     # Load BirefNet session from the shared models directory.
     os.environ.setdefault("U2NET_HOME", os.path.join(SHARED_DIR, "models"))
