@@ -19,7 +19,7 @@ import pillow_heif  # enables HEIC/HEIF decode in Pillow
 SHARED_DIR   = "/mnt/shared"
 INPUT_DIR    = os.path.join(SHARED_DIR, "input")              # originals (PNG-normalized)
 RESIZED_DIR  = os.path.join(SHARED_DIR, "resized")            # ≤1024 for SAM
-MASKS_DIR    = os.path.join(SHARED_DIR, "output", "masks")    # from Server2
+MASKS_DIR    = os.path.join(SHARED_DIR, "output", "masks")    # mask PNGs from Server2 worker
 CROPS_DIR    = os.path.join(SHARED_DIR, "output", "crops")    # RGBA crops
 SMALLS_DIR   = os.path.join(SHARED_DIR, "output", "smalls")
 THUMBS_ORIG_DIR = os.path.join(SHARED_DIR, "output", "thumbs", "originals")

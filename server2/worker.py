@@ -9,7 +9,10 @@ import numpy as np
 # -------------------------
 SHARED_DIR = "/mnt/shared"
 RESIZED_DIR = os.path.join(SHARED_DIR, "resized")
-PAGES_DIR = os.path.join(SHARED_DIR, "output", "pages")
+# Original-resolution images live here; used for full-image fallback
+INPUT_DIR = os.path.join(SHARED_DIR, "input")
+# Directory where this worker will emit mask PNGs for each detected page
+MASKS_DIR = os.path.join(SHARED_DIR, "output", "masks")
 
 
 def _detect_pages(image_bgr: np.ndarray) -> list[np.ndarray]:
@@ -56,12 +59,14 @@ def _resize_to_max(image: np.ndarray, max_side: int = 1024) -> np.ndarray:
     return image
 
 
-def load_processed_set():
-    """Return set of base names already present in the pages directory."""
-    processed = set()
-    for fname in os.listdir(PAGES_DIR):
-        if fname.lower().endswith((".png", ".jpg", ".jpeg")):
-            processed.add(os.path.splitext(fname)[0])
+def load_processed_set() -> set[str]:
+    """Return set of base names already present in the masks directory."""
+    processed: set[str] = set()
+    for fname in os.listdir(MASKS_DIR):
+        if not fname.lower().endswith(".png") or "_mask" not in fname:
+            continue
+        base = fname.split("_mask")[0]
+        processed.add(base)
     return processed
 
 def main() -> None:
@@ -69,10 +74,14 @@ def main() -> None:
     parser.parse_args()
 
     os.makedirs(RESIZED_DIR, exist_ok=True)
-    os.makedirs(PAGES_DIR, exist_ok=True)
+    os.makedirs(MASKS_DIR, exist_ok=True)
 
     while True:
-        files = [f for f in os.listdir(RESIZED_DIR) if f.endswith((".png", ".jpg", ".jpeg"))]
+        files = [
+            f
+            for f in os.listdir(RESIZED_DIR)
+            if f.lower().endswith((".png", ".jpg", ".jpeg"))
+        ]
         if not files:
             #print("[Worker] No pages found")
             time.sleep(2)
@@ -89,28 +98,25 @@ def main() -> None:
                 img = cv2.imread(file_path)
                 if img is None:
                     continue
+
                 page_masks = _detect_pages(img)
-                if len(page_masks) == 0:
-                    print(f"[Worker] No pages detected in {f}; moving original")
-                    out_path = os.path.join(PAGES_DIR, f)
-                    # Move the original file to pages directory
-                    os.replace(file_path, out_path)
-                    # Ensure a resized copy is available for downstream workers
-                    resized_img = _resize_to_max(img)
-                    cv2.imwrite(os.path.join(RESIZED_DIR, f), resized_img)
+                if not page_masks:
+                    # Fallback: treat the entire original image as one mask
+                    print(f"[Worker] No pages detected in {f}; using full image mask")
+                    orig_path = os.path.join(INPUT_DIR, f)
+                    orig_img = cv2.imread(orig_path)
+                    if orig_img is not None:
+                        mask_shape = orig_img.shape[:2]
+                    else:
+                        mask_shape = img.shape[:2]
+                    page_masks = [np.ones(mask_shape, dtype=np.uint8) * 255]
                 else:
                     print(f"[Worker] Detected {len(page_masks)} page(s) in {f}")
-                    combined = np.zeros(img.shape[:2], dtype=np.uint8)
-                    for page_mask in page_masks:
-                        combined = cv2.bitwise_or(combined, page_mask)
-                    bgra = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
-                    bgra[:, :, 3] = combined
-                    out_path = os.path.join(PAGES_DIR, f)
-                    cv2.imwrite(out_path, bgra)
-                    # Save resized copy for further processing
-                    resized_bgra = _resize_to_max(bgra)
-                    cv2.imwrite(os.path.join(RESIZED_DIR, f), resized_bgra)
-                    os.remove(file_path)
+
+                for idx, mask in enumerate(page_masks):
+                    mask_path = os.path.join(MASKS_DIR, f"{base}_mask{idx}.png")
+                    cv2.imwrite(mask_path, mask)
+
                 processed.add(base)
                 end = time.process_time()
                 total = end - start
