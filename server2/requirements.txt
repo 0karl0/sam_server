@@ -4,7 +4,9 @@ torch
 torchvision
 git+https://github.com/facebookresearch/segment-anything.git
 rembg
+#rembg[gpu]
 onnxruntime
+#onnxruntime[gpu]
 #birefnet
 
 #segment-anything  # if pip-installable, else clone from github in Dockerfile
