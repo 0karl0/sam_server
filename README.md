@@ -1,12 +1,25 @@
+# Artwork Object Detection Server
 
-wget -nc https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-DIS-epoch_590.onnx -O shared/models/birefnet-dis.onnx
+This fork removes SAM and Rembg processing and instead uses YOLO models trained on artwork to detect objects. Each model produces a single output image with bounding boxes and its name overlaid on the image.
 
-wget -nc https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth -O shared/models/vit_l.pth
+## Building
 
-docker build -t sam-server1 -f Server1.Dockerfile .
+The Dockerfiles automatically download the required YOLOv8 model weights and install the system libraries needed for `torchvision`.
 
-docker run -it --rm -p 5050:5050 -v $(pwd)/shared:/mnt/shared -e RUNPOD_API_KEY="your_api_key_here" -e GPU_POD_ID="your_gpu_pod_id_here" sam-server1
+```bash
+# Server 1
+docker build -t yolo-server1 -f Server1.Dockerfile .
 
-docker build -t sam-server2 -f Server2.Dockerfile .
+# Server 2
+docker build -t yolo-server2 -f Server2.Dockerfile .
+```
 
-docker run -it --rm -v $(pwd)/shared:/mnt/shared sam-server2
+## Running
+
+```bash
+# Server 1
+docker run -it --rm -p 5050:5050 -v $(pwd)/shared:/mnt/shared yolo-server1
+
+# Server 2
+docker run -it --rm -v $(pwd)/shared:/mnt/shared yolo-server2
+```
