@@ -1,5 +1,5 @@
 
-wget -nc https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-DIS-epoch_590.onnx -O shared/models/
+wget -nc https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-DIS-epoch_590.onnx -O shared/models/birefnet-dis.onnx
 
 wget -nc https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth -O shared/models/
 docker build -t sam-server1 -f Server1.Dockerfile .
