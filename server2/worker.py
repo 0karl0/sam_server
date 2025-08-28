@@ -15,11 +15,12 @@ MODEL_DIR = os.environ.get("MODEL_DIR", "/models")
 if not os.path.isdir(MODEL_DIR):
     MODEL_DIR = os.path.join(SHARED_DIR, "models")
 
-# Dynamically load YOLO models found in MODEL_DIR (.pt files)
+
+# Dynamically load all detection models found in MODEL_DI
 MODELS: dict[str, YOLO] = {}
 if os.path.isdir(MODEL_DIR):
     for fname in os.listdir(MODEL_DIR):
-        if fname.lower().endswith(".pt"):
+        if fname.lower().endswith((".pt", ".pth")):
             path = os.path.join(MODEL_DIR, fname)
             name = os.path.splitext(fname)[0]
             try:
@@ -28,6 +29,7 @@ if os.path.isdir(MODEL_DIR):
                 print(f"[Worker] Failed to load {fname}: {e}")
     if not MODELS:
         print(f"[Worker] No YOLO models found in {MODEL_DIR}")
+
 else:
     print(f"[Worker] Model directory not found: {MODEL_DIR}")
 

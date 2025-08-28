@@ -31,3 +31,4 @@ services:
       - ./shared/models:/models
     environment:
       - MODEL_DIR=/models
+
