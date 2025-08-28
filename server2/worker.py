@@ -7,7 +7,7 @@ from ultralytics import YOLO
 SHARED_DIR = "/mnt/shared"
 RESIZED_DIR = os.path.join(SHARED_DIR, "resized")
 OUTPUT_DIR = os.path.join(SHARED_DIR, "output", "boxes")
-MODEL_DIR = "/models"
+MODEL_DIR = os.path.join(SHARED_DIR, "models")
 
 # Dynamically load all YOLO models found in MODEL_DIR
 MODELS: dict[str, YOLO] = {}
