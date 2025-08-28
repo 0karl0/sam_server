@@ -11,11 +11,6 @@ RUN apt-get update && apt-get install -y \
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Download YOLO models trained on artwork
-RUN mkdir -p /models && \
-    curl -L https://huggingface.co/ultralytics/yolov8/resolve/main/yolov8n.pt -o /models/yolov8n-art.pt && \
-    curl -L https://huggingface.co/ultralytics/yolov8/resolve/main/yolov8s.pt -o /models/yolov8s-art.pt
-
 # Install deps
 COPY server1/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
