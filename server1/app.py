@@ -116,7 +116,7 @@ def save_crops_index(index: Dict[str, List[str]]) -> None:
 
 def ensure_settings_defaults() -> dict:
     defaults = {
-        "model_type": "vit_b",         # allow vit_b / vit_l / vit_h
+        "model_type": "vit_b",         # allow vit_b / vit_l / vit_h / rf-detr / rt-detr / d-fine
         "points_per_side": 32,
         "pred_iou_thresh": 0.88,
         "stability_score_thresh": 0.95,
