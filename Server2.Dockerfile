@@ -3,7 +3,6 @@ FROM intel/intel-optimized-pytorch
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
-    curl \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
