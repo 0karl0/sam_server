@@ -35,7 +35,10 @@ else:
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-processed = set()
+# Track which models have processed each image.  This allows newly added models
+# to run on existing uploads instead of requiring users to re-upload files.
+# {"image_stem": {"model_a", "model_b"}, ...}
+processed: dict[str, set[str]] = {}
 
 while True:
     files = [f for f in os.listdir(RESIZED_DIR) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
@@ -46,13 +49,18 @@ while True:
     print(f"[Worker] Found {len(files)} image(s): {files}")
     for filename in files:
         base = os.path.splitext(filename)[0]
-        if base in processed:
-            continue
         path = os.path.join(RESIZED_DIR, filename)
         image = cv2.imread(path)
         if image is None:
             continue
+
+        # Ensure there is a set to track processed models for this image
+        done_models = processed.setdefault(base, set())
+
         for model_name, model in MODELS.items():
+            if model_name in done_models:
+                continue
+
             results = model(image)[0]
             annotated = image.copy()
             for box in results.boxes:
@@ -70,6 +78,7 @@ while True:
                     1,
                     cv2.LINE_AA,
                 )
+
             cv2.putText(
                 annotated,
                 model_name,
@@ -82,5 +91,7 @@ while True:
             )
             out_file = os.path.join(OUTPUT_DIR, f"{base}_{model_name}.png")
             cv2.imwrite(out_file, annotated)
-        processed.add(base)
+
+            # Remember that this model has processed this image
+            done_models.add(model_name)
     time.sleep(2)
