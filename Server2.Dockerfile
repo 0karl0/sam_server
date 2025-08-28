@@ -2,14 +2,15 @@ FROM intel/intel-optimized-pytorch
 
 WORKDIR /app
 
-# Install system dependencies for OpenCV
 RUN apt-get update && apt-get install -y \
-    git \ 
+    curl \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender1 \
+    libjpeg-dev \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and install Python dependencies
