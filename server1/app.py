@@ -22,6 +22,8 @@ RESIZED_DIR  = os.path.join(SHARED_DIR, "resized")            # ≤1024 for SAM
 MASKS_DIR    = os.path.join(SHARED_DIR, "output", "masks")    # from Server2
 CROPS_DIR    = os.path.join(SHARED_DIR, "output", "crops")    # RGBA crops
 SMALLS_DIR   = os.path.join(SHARED_DIR, "output", "smalls")
+BOX_DIR   = os.path.join(SHARED_DIR, "output", "boxes")
+
 PROCESSED_FILE = os.path.join(SHARED_DIR, "output", "processed.json")
 CONFIG_DIR   = os.path.join(SHARED_DIR, "config")
 SETTINGS_JSON = os.path.join(CONFIG_DIR, "settings.json")
@@ -319,7 +321,7 @@ def list_crops():
 @app.route("/clear_all", methods=["POST"])
 def clear_all():
     """Remove all processed images and trackers."""
-    dirs = [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR]
+    dirs = [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR, BOX_DIR]
     for d in dirs:
         for name in os.listdir(d):
             path = os.path.join(d, name)
