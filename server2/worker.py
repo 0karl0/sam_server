@@ -37,7 +37,10 @@ class DetectionModel:
                 out.append((x1, y1, x2, y2, label))
             return out
         if self.kind == "detr":
-            transform = T.Compose([T.ToTensor()])
+            transform = T.Compose([
+                T.ToTensor(),
+                T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ])
             tensor = transform(image).unsqueeze(0)
             with torch.no_grad():
                 outputs = self.model(tensor)
@@ -95,7 +98,8 @@ def load_models(model_dir: str, models: dict[str, DetectionModel] | None = None)
         if "detr" in lower:
             try:
                 detr = torch.hub.load(
-                    "facebookresearch/detr", "detr_resnet50", pretrained=False
+                    "facebookresearch/detr", "detr_resnet50", pretrained=False,
+                    trust_repo=True,
                 )
                 state = torch.load(path, map_location="cpu")
                 state = state.get("model", state)
@@ -109,7 +113,8 @@ def load_models(model_dir: str, models: dict[str, DetectionModel] | None = None)
         if "dfine" in lower or "d-fine" in lower:
             try:
                 dfine = torch.hub.load(
-                    "lyuwenyu/D-FINE", "dfine_r18", pretrained=False
+                    "lyuwenyu/D-FINE", "dfine_r18", pretrained=False,
+                    trust_repo=True,
                 )
 
                 state = torch.load(path, map_location="cpu")
