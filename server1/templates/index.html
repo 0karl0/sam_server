@@ -300,7 +300,7 @@
           <img class="thumb" src="${a.original_url}" alt="">
           <div class="meta">
             <b>${a.original}</b>
-            <span>${a.crops.length} clipping${a.crops.length===1?"":"s"}</span>
+            <span>${a.crops.length} clipping${a.crops.length===1?"":"s"} · ${a.boxes.length} box${a.boxes.length===1?"":"es"}</span>
           </div>
           <div class="arrow" style="margin-left:auto;color:var(--sub);">${arrow}</div>
         `;
@@ -308,19 +308,39 @@
         const body = document.createElement("div");
         body.className="albumBody"; body.style.display = isOpen ? "block" : "none";
 
-        const chips = document.createElement("div"); chips.className="chips";
+        const cropTitle=document.createElement("div"); cropTitle.textContent="Clippings";
+        body.appendChild(cropTitle);
+
+        const cropChips = document.createElement("div"); cropChips.className="chips";
         if(a.crops.length===0){
           const empty=document.createElement("div"); empty.className="chip"; empty.textContent="No clippings yet.";
-          chips.appendChild(empty);
+          cropChips.appendChild(empty);
         }else{
           a.crops.forEach(c=>{
             const chip=document.createElement("div"); chip.className="chip";
             const img=document.createElement("img"); img.src=c.url; img.alt=c.file; img.title="Add to canvas";
             img.onclick=()=> addToCanvas(c.url);
-            chip.appendChild(img); chips.appendChild(chip);
+            chip.appendChild(img); cropChips.appendChild(chip);
           });
         }
-        body.appendChild(chips);
+        body.appendChild(cropChips);
+
+        const boxTitle=document.createElement("div"); boxTitle.textContent="Boxes"; boxTitle.style.marginTop="8px";
+        body.appendChild(boxTitle);
+
+        const boxChips=document.createElement("div"); boxChips.className="chips";
+        if(a.boxes.length===0){
+          const empty=document.createElement("div"); empty.className="chip"; empty.textContent="No boxes yet.";
+          boxChips.appendChild(empty);
+        }else{
+          a.boxes.forEach(b=>{
+            const chip=document.createElement("div"); chip.className="chip";
+            const img=document.createElement("img"); img.src=b.url; img.alt=b.file; img.title=b.model;
+            img.onclick=()=> addToCanvas(b.url);
+            chip.appendChild(img); boxChips.appendChild(chip);
+          });
+        }
+        body.appendChild(boxChips);
 
         head.addEventListener("click", ()=>{
           const key=head.dataset.original;
