@@ -68,6 +68,7 @@ def load_models(model_dir: str, models: dict[str, DetectionModel] | None = None)
     if models is None:
         models = {}
 
+
     if not os.path.isdir(model_dir):
         print(f"[Worker] Model directory not found: {model_dir}")
         return models
@@ -85,6 +86,7 @@ def load_models(model_dir: str, models: dict[str, DetectionModel] | None = None)
             yolo = YOLO(path)
             models[name] = DetectionModel(name, yolo, "yolo")
             print(f"[Worker] Loaded YOLO model: {fname}")
+
             continue
         except Exception as e:
             print(f"[Worker] Failed to load {fname} with YOLO: {e}")
@@ -109,6 +111,7 @@ def load_models(model_dir: str, models: dict[str, DetectionModel] | None = None)
                 dfine = torch.hub.load(
                     "lyuwenyu/D-FINE", "dfine_r18", pretrained=False
                 )
+
                 state = torch.load(path, map_location="cpu")
                 dfine.load_state_dict(state)
                 dfine.eval()
@@ -121,6 +124,7 @@ def load_models(model_dir: str, models: dict[str, DetectionModel] | None = None)
     if not models:
         print(f"[Worker] No detection models found in {model_dir}")
     return models
+
 
 
 # Dynamically load all detection models found in MODEL_DIR
