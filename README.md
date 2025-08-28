@@ -1,10 +1,14 @@
 # Artwork Object Detection Server
 
-This fork removes SAM and Rembg processing and instead uses YOLO models trained on artwork to detect objects. Each model produces a single output image with bounding boxes and its name overlaid on the image.
+This fork removes SAM and Rembg processing and instead uses detection models trained on artwork (YOLO, DETR, D-FINE) to detect objects. Each model produces a single output image with bounding boxes and its name overlaid on the image.
 
 ## Model Weights
 
-
+Place any detection weights (`.pt`/`.pth`) in `shared/models` (mounted at
+`/models` in the containers). Files with `detr` or `dfine` in their names are
+treated as DETR or D‑FINE models; everything else loads through the YOLO
+interface. The worker monitors this directory and loads new weights on the fly
+so you can drop in additional models without restarting the container.
 
 ```bash
 # Server 1
