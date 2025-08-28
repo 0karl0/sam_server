@@ -15,7 +15,8 @@ MODEL_DIR = os.environ.get("MODEL_DIR", "/models")
 if not os.path.isdir(MODEL_DIR):
     MODEL_DIR = os.path.join(SHARED_DIR, "models")
 
-# Dynamically load all detection models found in MODEL_DIR
+
+# Dynamically load all detection models found in MODEL_DI
 MODELS: dict[str, YOLO] = {}
 if os.path.isdir(MODEL_DIR):
     for fname in os.listdir(MODEL_DIR):
@@ -26,6 +27,9 @@ if os.path.isdir(MODEL_DIR):
                 MODELS[name] = YOLO(path)
             except Exception as e:
                 print(f"[Worker] Failed to load {fname}: {e}")
+    if not MODELS:
+        print(f"[Worker] No YOLO models found in {MODEL_DIR}")
+
 else:
     print(f"[Worker] Model directory not found: {MODEL_DIR}")
 

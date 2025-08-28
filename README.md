@@ -4,23 +4,7 @@ This fork removes SAM and Rembg processing and instead uses YOLO models trained 
 
 ## Model Weights
 
-On container start the Dockerfiles now fetch a small set of sample detectors into
-`shared/models/` using `wget -nc` (no clobber).  Any additional weight files
-dropped into that folder will be loaded automatically by the worker.
 
-Included samples:
-
-- [yolov8n.pt](https://huggingface.co/ultralytics/yolov8/resolve/main/yolov8n.pt)
-- [rf_detr_r50.pth](https://github.com/lyuwenyu/rf-detr/releases/download/v0.1/rf_detr_r50.pth)
-- [rt_detr_r50.pth](https://github.com/lyuwenyu/RT-DETR/releases/download/v0.1/rt_detr_r50.pth)
-- [dfine_r18.pth](https://github.com/lyuwenyu/D-FINE/releases/download/v0.1/dfine_r18.pth)
-
-For line drawings, you may have better luck with models fine-tuned on sketch datasets; search sites like [Hugging Face](https://huggingface.co/models?search=line%20art%20yolo) for "line art" or "sketch" YOLO variants.
-
-## Building
-
-The Dockerfiles install the system libraries needed for `torchvision` and
-download the sample weights at runtime.
 
 ```bash
 # Server 1

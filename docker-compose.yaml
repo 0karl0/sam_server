@@ -29,3 +29,6 @@ services:
     volumes:
       - ./shared:/mnt/shared
       - ./shared/models:/models
+    environment:
+      - MODEL_DIR=/models
+
