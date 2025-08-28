@@ -1,6 +1,6 @@
 # Artwork Object Detection Server
 
-This fork removes SAM and Rembg processing and instead uses YOLO models trained on artwork to detect objects. Each model produces a single output image with bounding boxes and its name overlaid on the image.
+This fork removes SAM and Rembg processing and instead uses detection models trained on artwork (YOLO, DETR, D-FINE) to detect objects. Each model produces a single output image with bounding boxes and its name overlaid on the image.
 
 ## Model Weights
 
