@@ -57,8 +57,18 @@ class DetectionModel:
         return []
 
 
-def load_models(model_dir: str) -> dict[str, DetectionModel]:
-    models: dict[str, DetectionModel] = {}
+def load_models(model_dir: str, models: dict[str, DetectionModel] | None = None) -> dict[str, DetectionModel]:
+    """Populate ``models`` with any weights found in ``model_dir``.
+
+    Subsequent calls will only attempt to load weights that are not already
+    present in ``models`` so that new files dropped into the directory are
+    picked up automatically without restarting the worker.
+    """
+
+    if models is None:
+        models = {}
+
+
     if not os.path.isdir(model_dir):
         print(f"[Worker] Model directory not found: {model_dir}")
         return models
@@ -66,11 +76,17 @@ def load_models(model_dir: str) -> dict[str, DetectionModel]:
     for fname in os.listdir(model_dir):
         if not fname.lower().endswith((".pt", ".pth")):
             continue
-        path = os.path.join(model_dir, fname)
+
         name = os.path.splitext(fname)[0]
+        if name in models:
+            continue
+
+        path = os.path.join(model_dir, fname)
         try:
             yolo = YOLO(path)
             models[name] = DetectionModel(name, yolo, "yolo")
+            print(f"[Worker] Loaded YOLO model: {fname}")
+
             continue
         except Exception as e:
             print(f"[Worker] Failed to load {fname} with YOLO: {e}")
@@ -78,22 +94,29 @@ def load_models(model_dir: str) -> dict[str, DetectionModel]:
         lower = name.lower()
         if "detr" in lower:
             try:
-                detr = torch.hub.load("facebookresearch/detr", "detr_resnet50", pretrained=False)
+                detr = torch.hub.load(
+                    "facebookresearch/detr", "detr_resnet50", pretrained=False
+                )
                 state = torch.load(path, map_location="cpu")
                 state = state.get("model", state)
                 detr.load_state_dict(state)
                 detr.eval()
                 models[name] = DetectionModel(name, detr, "detr")
+                print(f"[Worker] Loaded DETR model: {fname}")
                 continue
             except Exception as e2:
                 print(f"[Worker] Failed to load {fname} as DETR: {e2}")
         if "dfine" in lower or "d-fine" in lower:
             try:
-                dfine = torch.hub.load("lyuwenyu/D-FINE", "dfine_r18", pretrained=False)
+                dfine = torch.hub.load(
+                    "lyuwenyu/D-FINE", "dfine_r18", pretrained=False
+                )
+
                 state = torch.load(path, map_location="cpu")
                 dfine.load_state_dict(state)
                 dfine.eval()
                 models[name] = DetectionModel(name, dfine, "dfine")
+                print(f"[Worker] Loaded D-FINE model: {fname}")
                 continue
             except Exception as e2:
                 print(f"[Worker] Failed to load {fname} as D-FINE: {e2}")
@@ -101,6 +124,7 @@ def load_models(model_dir: str) -> dict[str, DetectionModel]:
     if not models:
         print(f"[Worker] No detection models found in {model_dir}")
     return models
+
 
 
 # Dynamically load all detection models found in MODEL_DIR
@@ -114,6 +138,9 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 processed: dict[str, set[str]] = {}
 
 while True:
+    # Load any newly added model weights before processing images
+    load_models(MODEL_DIR, MODELS)
+
     files = [f for f in os.listdir(RESIZED_DIR) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
     if not files:
         print("[Worker] No images found")

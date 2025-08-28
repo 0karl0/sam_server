@@ -4,7 +4,11 @@ This fork removes SAM and Rembg processing and instead uses detection models tra
 
 ## Model Weights
 
-
+Place any detection weights (`.pt`/`.pth`) in `shared/models` (mounted at
+`/models` in the containers). Files with `detr` or `dfine` in their names are
+treated as DETR or D‑FINE models; everything else loads through the YOLO
+interface. The worker monitors this directory and loads new weights on the fly
+so you can drop in additional models without restarting the container.
 
 ```bash
 # Server 1
