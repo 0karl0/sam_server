@@ -4,20 +4,23 @@ This fork removes SAM and Rembg processing and instead uses YOLO models trained 
 
 ## Model Weights
 
-Download the desired YOLOv8 weight files and place them in `shared/models/` before running the containers. The worker loads every `.pt` file in that folder automatically, so you can drop in additional models to experiment.
+On container start the Dockerfiles now fetch a small set of sample detectors into
+`shared/models/` using `wget -nc` (no clobber).  Any additional weight files
+dropped into that folder will be loaded automatically by the worker.
 
-Common choices:
+Included samples:
 
 - [yolov8n.pt](https://huggingface.co/ultralytics/yolov8/resolve/main/yolov8n.pt)
-- [yolov8s.pt](https://huggingface.co/ultralytics/yolov8/resolve/main/yolov8s.pt)
-- [yolov8m.pt](https://huggingface.co/ultralytics/yolov8/resolve/main/yolov8m.pt)
-- [yolov8l.pt](https://huggingface.co/ultralytics/yolov8/resolve/main/yolov8l.pt)
+- [rf_detr_r50.pth](https://github.com/lyuwenyu/rf-detr/releases/download/v0.1/rf_detr_r50.pth)
+- [rt_detr_r50.pth](https://github.com/lyuwenyu/RT-DETR/releases/download/v0.1/rt_detr_r50.pth)
+- [dfine_r18.pth](https://github.com/lyuwenyu/D-FINE/releases/download/v0.1/dfine_r18.pth)
 
 For line drawings, you may have better luck with models fine-tuned on sketch datasets; search sites like [Hugging Face](https://huggingface.co/models?search=line%20art%20yolo) for "line art" or "sketch" YOLO variants.
 
 ## Building
 
-The Dockerfiles install the system libraries needed for `torchvision` but do **not** download any model weights.
+The Dockerfiles install the system libraries needed for `torchvision` and
+download the sample weights at runtime.
 
 ```bash
 # Server 1
@@ -31,7 +34,7 @@ docker build -t yolo-server2 -f Server2.Dockerfile .
 
 ```bash
 # Server 1
-docker run -it --rm -p 5050:5050 -v $(pwd)/shared:/mnt/shared yolo-server1
+docker run -it --rm -p 5050:5050 -v $(pwd)/shared:/mnt/shared -v $(pwd)/shared/models:/models yolo-server1
 
 # Server 2
 docker run -it --rm -v $(pwd)/shared:/mnt/shared -v $(pwd)/shared/models:/models yolo-server2

@@ -4,19 +4,28 @@ import cv2
 from ultralytics import YOLO
 
 # Directories
+# Shared directories
 SHARED_DIR = "/mnt/shared"
 RESIZED_DIR = os.path.join(SHARED_DIR, "resized")
 OUTPUT_DIR = os.path.join(SHARED_DIR, "output", "boxes")
-MODEL_DIR = os.path.join(SHARED_DIR, "models")
 
-# Dynamically load all YOLO models found in MODEL_DIR
+# Model directory: prefer /models (populated by Dockerfile),
+# fall back to /mnt/shared/models for backwards compatibility.
+MODEL_DIR = os.environ.get("MODEL_DIR", "/models")
+if not os.path.isdir(MODEL_DIR):
+    MODEL_DIR = os.path.join(SHARED_DIR, "models")
+
+# Dynamically load all detection models found in MODEL_DIR
 MODELS: dict[str, YOLO] = {}
 if os.path.isdir(MODEL_DIR):
     for fname in os.listdir(MODEL_DIR):
-        if fname.lower().endswith(".pt"):
+        if fname.lower().endswith((".pt", ".pth")):
             path = os.path.join(MODEL_DIR, fname)
             name = os.path.splitext(fname)[0]
-            MODELS[name] = YOLO(path)
+            try:
+                MODELS[name] = YOLO(path)
+            except Exception as e:
+                print(f"[Worker] Failed to load {fname}: {e}")
 else:
     print(f"[Worker] Model directory not found: {MODEL_DIR}")
 

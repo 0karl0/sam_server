@@ -10,6 +10,7 @@ services:
       - "5000:5000"
     volumes:
       - ./shared:/mnt/shared
+      - ./shared/models:/models
     environment:
       - RUNPOD_API_KEY=${RUNPOD_API_KEY}
       - GPU_POD_ID=${GPU_POD_ID}
@@ -27,3 +28,4 @@ services:
             - capabilities: [gpu]
     volumes:
       - ./shared:/mnt/shared
+      - ./shared/models:/models
