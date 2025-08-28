@@ -27,4 +27,3 @@ services:
             - capabilities: [gpu]
     volumes:
       - ./shared:/mnt/shared
-      - ./shared/models:/models
