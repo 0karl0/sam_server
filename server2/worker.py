@@ -142,7 +142,13 @@ def _get_yolo_points(image_path: str) -> list[tuple[float, float, int]]:
     """
 
     points: list[tuple[float, float, int]] = []
-    if not _YOLO_AVAILABLE or not os.path.isdir(YOLO_MODELS_DIR):
+    if not _YOLO_AVAILABLE:
+        print("[Worker] YOLO models not available, skipping YOLO point generation")
+        return points
+    if not os.path.isdir(YOLO_MODELS_DIR):
+        print(
+            f"[Worker] YOLO models directory '{YOLO_MODELS_DIR}' not found, skipping"
+        )
         return points
 
     base_name = os.path.splitext(os.path.basename(image_path))[0]
