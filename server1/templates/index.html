@@ -295,7 +295,7 @@
         const isOpen = !!openState[a.original]; const arrow = isOpen ? "▲" : "▼";
         head.innerHTML = `
           <div class="thumbWrap" style="position:relative;">
-            <img class="thumb" src="${a.original_url}" alt="">
+            <img class="thumb" src="${a.thumb_url}" alt="">
           </div>
           <div class="meta">
             <b>${a.original}</b>
@@ -339,7 +339,7 @@
         }else{
           a.crops.forEach(c=>{
             const chip=document.createElement("div"); chip.className="chip";
-            const img=document.createElement("img"); img.src=c.url; img.alt=c.file; img.title="Add to canvas";
+            const img=document.createElement("img"); img.src=c.thumb_url; img.alt=c.file; img.title="Add to canvas";
             img.onclick=()=> addToCanvas(c.url);
             chip.appendChild(img); chips.appendChild(chip);
           });
