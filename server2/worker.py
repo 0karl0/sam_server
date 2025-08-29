@@ -48,6 +48,7 @@ MODEL_PATH = os.path.join(SHARED_DIR, "models", "vit_l.pth")
 PROCESSED_FILE = os.path.join(SHARED_DIR, "output", "processed.json")
 YOLO_MODELS_DIR = os.path.join(SHARED_DIR, "output", "models")
 POINTS_DIR = os.path.join(SHARED_DIR, "output", "points")
+BOXES_DIR = os.path.join(SHARED_DIR, "output", "boxes")
 
 AREA_THRESH = 1000  # pixel area below which masks are treated as "smalls"
 
@@ -66,6 +67,7 @@ os.makedirs(MASKS_DIR, exist_ok=True)
 os.makedirs(SMALLS_DIR, exist_ok=True)
 os.makedirs(CROPS_DIR, exist_ok=True)
 os.makedirs(POINTS_DIR, exist_ok=True)
+os.makedirs(BOXES_DIR, exist_ok=True)
 
 
 def _refine_mask_with_rembg(image_bgr: np.ndarray) -> np.ndarray:
@@ -143,13 +145,20 @@ def _get_yolo_points(image_path: str) -> list[tuple[float, float, int]]:
     if not _YOLO_AVAILABLE or not os.path.isdir(YOLO_MODELS_DIR):
         return points
 
+    base_name = os.path.splitext(os.path.basename(image_path))[0]
+    img = cv2.imread(image_path)
+    combined = img.copy() if img is not None else None
+
+    print(f"[Worker] Running YOLO models on {image_path}")
     for fname in os.listdir(YOLO_MODELS_DIR):
         if not fname.lower().endswith((".pt", ".onnx")):
             continue
         model_path = os.path.join(YOLO_MODELS_DIR, fname)
+        print(f"[Worker] Running YOLO model {fname}")
         try:
             model = YOLO(model_path)
             results = model(image_path)
+            model_img = img.copy() if img is not None else None
             for r in results:
                 names = getattr(r, "names", {})
                 for box in getattr(r, "boxes", []):
@@ -158,12 +167,46 @@ def _get_yolo_points(image_path: str) -> list[tuple[float, float, int]]:
                     x1, y1, x2, y2 = box.xyxy[0].tolist()
                     cx = (x1 + x2) / 2.0
                     cy = (y1 + y2) / 2.0
+                    print(
+                        f"[Worker] {fname} detected {label} at ({x1:.1f}, {y1:.1f}, {x2:.1f}, {y2:.1f})"
+                    )
                     if label in {"person", "human"}:
                         points.append((cx, cy, 0))
                     else:
                         points.append((cx, cy, 1))
+                    if model_img is not None:
+                        cv2.rectangle(
+                            model_img,
+                            (int(x1), int(y1)),
+                            (int(x2), int(y2)),
+                            (0, 255, 0),
+                            2,
+                        )
+                        cv2.circle(model_img, (int(cx), int(cy)), 3, (0, 0, 255), -1)
+                    if combined is not None:
+                        cv2.rectangle(
+                            combined,
+                            (int(x1), int(y1)),
+                            (int(x2), int(y2)),
+                            (0, 255, 0),
+                            2,
+                        )
+                        cv2.circle(combined, (int(cx), int(cy)), 3, (0, 0, 255), -1)
+            if model_img is not None:
+                out_file = os.path.join(
+                    BOXES_DIR, f"{base_name}-{os.path.splitext(fname)[0]}.png"
+                )
+                cv2.imwrite(out_file, model_img)
         except Exception as e:  # pragma: no cover - inference may fail
             print(f"[Worker] YOLO model {fname} failed: {e}")
+
+    if combined is not None:
+        try:
+            out_file = os.path.join(BOXES_DIR, f"{base_name}-combined.png")
+            cv2.imwrite(out_file, combined)
+        except Exception as e:  # pragma: no cover - best effort only
+            print(f"[Worker] Failed to save combined boxes for {base_name}: {e}")
+
     return points
 
 
