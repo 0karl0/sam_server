@@ -79,6 +79,7 @@ def load_models(model_dir: str, models: dict[str, DetectionModel] | None = None)
     files = os.listdir(model_dir)
     print(f"[Worker] Scanning {model_dir} for weights: {files}")
 
+
     found_detr = False
 
     for fname in files:
@@ -102,7 +103,9 @@ def load_models(model_dir: str, models: dict[str, DetectionModel] | None = None)
 
         lower = name.lower()
         if "detr" in lower:
+
             found_detr = True
+
             print(
                 "[Worker] DETR weights detected; loading model definition "
                 "facebookresearch/detr:detr_resnet50"
@@ -143,8 +146,29 @@ def load_models(model_dir: str, models: dict[str, DetectionModel] | None = None)
         else:
             print(f"[Worker] No loader configured for {fname}")
 
-    if not found_detr:
-        print(f"[Worker] No DETR weights found in {model_dir}")
+    # Ensure built-in hub models are available even if no local weights are present
+    if not any(m.kind == "detr" for m in models.values()):
+        try:
+            print("[Worker] Loading pretrained DETR via torch.hub")
+            detr = torch.hub.load(
+                "facebookresearch/detr", "detr_resnet50", pretrained=True, trust_repo=True
+            )
+            detr.eval()
+            models["detr_resnet50"] = DetectionModel("detr_resnet50", detr, "detr")
+        except Exception as e:
+            print(f"[Worker] Failed to load DETR via torch.hub: {e}")
+
+    if not any(m.kind == "dfine" for m in models.values()):
+        try:
+            print("[Worker] Loading pretrained D-FINE via torch.hub")
+            dfine = torch.hub.load(
+                "lyuwenyu/D-FINE", "dfine_r18", pretrained=True, trust_repo=True
+            )
+            dfine.eval()
+            models["dfine_r18"] = DetectionModel("dfine_r18", dfine, "dfine")
+        except Exception as e:
+            print(f"[Worker] Failed to load D-FINE via torch.hub: {e}")
+
 
     if not models:
         print(f"[Worker] No detection models found in {model_dir}")
