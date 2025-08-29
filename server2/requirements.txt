@@ -2,4 +2,9 @@ opencv-python
 numpy
 torch
 torchvision
-ultralytics
+git+https://github.com/facebookresearch/segment-anything.git
+rembg
+onnxruntime
+#birefnet
+
+#segment-anything  # if pip-installable, else clone from github in Dockerfile
