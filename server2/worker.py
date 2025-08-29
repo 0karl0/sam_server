@@ -14,11 +14,12 @@ from segment_anything import (
 
 try:  # YOLO is optional
     from ultralytics import YOLO  # type: ignore
-
+    print("ultralytics loaded")
     _YOLO_AVAILABLE = True
 except Exception:  # pragma: no cover - ultralytics may not be installed
     YOLO = None  # type: ignore
     _YOLO_AVAILABLE = False
+    print("couldn't find ultralytics")
 
 try:
     import torch  # type: ignore
