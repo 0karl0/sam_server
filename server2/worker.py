@@ -79,6 +79,9 @@ def load_models(model_dir: str, models: dict[str, DetectionModel] | None = None)
     files = os.listdir(model_dir)
     print(f"[Worker] Scanning {model_dir} for weights: {files}")
 
+
+    found_detr = False
+
     for fname in files:
         print(f"[Worker] Inspecting {fname}")
         if not fname.lower().endswith((".pt", ".pth")):
@@ -100,6 +103,9 @@ def load_models(model_dir: str, models: dict[str, DetectionModel] | None = None)
 
         lower = name.lower()
         if "detr" in lower:
+
+            found_detr = True
+
             print(
                 "[Worker] DETR weights detected; loading model definition "
                 "facebookresearch/detr:detr_resnet50"
@@ -162,6 +168,7 @@ def load_models(model_dir: str, models: dict[str, DetectionModel] | None = None)
             models["dfine_r18"] = DetectionModel("dfine_r18", dfine, "dfine")
         except Exception as e:
             print(f"[Worker] Failed to load D-FINE via torch.hub: {e}")
+
 
     if not models:
         print(f"[Worker] No detection models found in {model_dir}")
