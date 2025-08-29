@@ -22,8 +22,6 @@ RESIZED_DIR  = os.path.join(SHARED_DIR, "resized")            # ≤1024 for SAM
 MASKS_DIR    = os.path.join(SHARED_DIR, "output", "masks")    # from Server2
 CROPS_DIR    = os.path.join(SHARED_DIR, "output", "crops")    # RGBA crops
 SMALLS_DIR   = os.path.join(SHARED_DIR, "output", "smalls")
-BOX_DIR      = os.path.join(SHARED_DIR, "output", "boxes")
-
 PROCESSED_FILE = os.path.join(SHARED_DIR, "output", "processed.json")
 CONFIG_DIR   = os.path.join(SHARED_DIR, "config")
 SETTINGS_JSON = os.path.join(CONFIG_DIR, "settings.json")
@@ -32,7 +30,7 @@ CROPS_INDEX   = os.path.join(CROPS_DIR, "index.json")         # manifest linking
 MAX_RESIZE = 1024  # longest side for SAM
 ALLOWED_EXT = {"png", "jpg", "jpeg", "webp", "bmp", "tiff", "heic", "heif"}
 
-for d in [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR, BOX_DIR, CONFIG_DIR]:
+for d in [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR, CONFIG_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # Register HEIF opener for Pillow
@@ -118,7 +116,7 @@ def save_crops_index(index: Dict[str, List[str]]) -> None:
 
 def ensure_settings_defaults() -> dict:
     defaults = {
-        "model_type": "vit_b",         # allow vit_b / vit_l / vit_h / rf-detr / rt-detr / d-fine
+        "model_type": "vit_b",         # allow vit_b / vit_l / vit_h
         "points_per_side": 32,
         "pred_iou_thresh": 0.88,
         "stability_score_thresh": 0.95,
@@ -243,9 +241,6 @@ def list_originals():
     for f in sorted(os.listdir(INPUT_DIR)):
         if not f.lower().endswith(".png"):
             continue
-
-        base = os.path.splitext(f)[0]
-
         crop_files = index.get(f, [])
         crops = []
         for c in crop_files:
@@ -259,18 +254,10 @@ def list_originals():
             except Exception:
                 pass
             crops.append({"file": c, "url": f"/crops/{c}", "area": area})
-
-        box_files = [b for b in os.listdir(BOX_DIR) if b.startswith(f"{base}_")]
-        boxes = []
-        for b in box_files:
-            model = os.path.splitext(b[len(base) + 1 :])[0]
-            boxes.append({"file": b, "url": f"/boxes/{b}", "model": model})
-
         albums.append({
             "original": f,
             "original_url": f"/input/{f}",
-            "crops": crops,
-            "boxes": boxes,
+            "crops": crops
         })
 
     return jsonify(albums)
@@ -308,10 +295,6 @@ def get_settings():
 def serve_crop(filename):
     return send_from_directory(CROPS_DIR, filename)
 
-@app.route("/boxes/<path:filename>", methods=["GET"])
-def serve_box(filename):
-    return send_from_directory(BOX_DIR, filename)
-
 @app.route("/list_crops", methods=["GET"])
 def list_crops():
     """
@@ -336,7 +319,7 @@ def list_crops():
 @app.route("/clear_all", methods=["POST"])
 def clear_all():
     """Remove all processed images and trackers."""
-    dirs = [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR, BOX_DIR]
+    dirs = [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR]
     for d in dirs:
         for name in os.listdir(d):
             path = os.path.join(d, name)

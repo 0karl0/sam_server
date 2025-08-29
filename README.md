@@ -1,29 +1,7 @@
-# Artwork Object Detection Server
+docker build -t sam-server1 -f Server1.Dockerfile .
 
-This fork removes SAM and Rembg processing and instead uses detection models trained on artwork (YOLO, DETR, D-FINE) to detect objects. Each model produces a single output image with bounding boxes and its name overlaid on the image.
+docker run -it --rm -p 5050:5050 -v $(pwd)/shared:/mnt/shared -e RUNPOD_API_KEY="your_api_key_here" -e GPU_POD_ID="your_gpu_pod_id_here" sam-server1
 
-## Model Weights
+docker build -t sam-server2 -f Server2.Dockerfile .
 
-Place any detection weights (`.pt`/`.pth`) in `shared/models` (mounted at
-`/models` in the containers). Files with `detr` or `dfine` in their names are
-treated as DETR or D‑FINE models; everything else loads through the YOLO
-interface. The worker monitors this directory and loads new weights on the fly
-so you can drop in additional models without restarting the container.
-
-```bash
-# Server 1
-docker build -t yolo-server1 -f Server1.Dockerfile .
-
-# Server 2
-docker build -t yolo-server2 -f Server2.Dockerfile .
-```
-
-## Running
-
-```bash
-# Server 1
-docker run -it --rm -p 5050:5050 -v $(pwd)/shared:/mnt/shared -v $(pwd)/shared/models:/models yolo-server1
-
-# Server 2
-docker run -it --rm -v $(pwd)/shared:/mnt/shared -v $(pwd)/shared/models:/models yolo-server2
-```
+docker run -it --rm -v $(pwd)/shared:/mnt/shared sam-server2
