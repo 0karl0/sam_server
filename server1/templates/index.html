@@ -319,9 +319,12 @@
             star.textContent='★';
             star.style.position='absolute';
             star.style.color='yellow';
-            star.style.fontSize='12px';
+            // use a larger font size so markers remain visible on the thumbnail
+            const size = 24; // px
+            star.style.fontSize = `${size}px`;
             const x=offX + (pt[0]/w)*sw; const y=offY + (pt[1]/h)*sh;
-            star.style.left=`${x-6}px`; star.style.top=`${y-6}px`;
+            // center the star around the detected point
+            star.style.left=`${x-size/2}px`; star.style.top=`${y-size/2}px`;
             tw.appendChild(star);
           });
         }
