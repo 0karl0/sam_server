@@ -4,9 +4,21 @@ import json
 import cv2
 import gc
 import numpy as np
-from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
 from PIL import Image
 from rembg import remove, new_session
+from segment_anything import (
+    SamAutomaticMaskGenerator,
+    SamPredictor,
+    sam_model_registry,
+)
+
+try:  # YOLO is optional
+    from ultralytics import YOLO  # type: ignore
+
+    _YOLO_AVAILABLE = True
+except Exception:  # pragma: no cover - ultralytics may not be installed
+    YOLO = None  # type: ignore
+    _YOLO_AVAILABLE = False
 
 try:
     import torch  # type: ignore
@@ -33,6 +45,7 @@ CROPS_DIR = os.path.join(SHARED_DIR, "output", "crops")
 CONFIG_FILE = os.path.join(SHARED_DIR, "config", "settings.json")
 MODEL_PATH = os.path.join(SHARED_DIR, "models", "vit_l.pth")
 PROCESSED_FILE = os.path.join(SHARED_DIR, "output", "processed.json")
+YOLO_MODELS_DIR = os.path.join(SHARED_DIR, "output", "models")
 
 AREA_THRESH = 1000  # pixel area below which masks are treated as "smalls"
 
@@ -114,6 +127,34 @@ def _crop_with_mask(image_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray | Non
     return bgra[y:y+h, x:x+w]
 
 
+def _get_yolo_points(image_path: str) -> list[tuple[float, float]]:
+    """Run all YOLO models and return midpoints of non-human boxes."""
+
+    points: list[tuple[float, float]] = []
+    if not _YOLO_AVAILABLE or not os.path.isdir(YOLO_MODELS_DIR):
+        return points
+
+    for fname in os.listdir(YOLO_MODELS_DIR):
+        if not fname.lower().endswith((".pt", ".onnx")):
+            continue
+        model_path = os.path.join(YOLO_MODELS_DIR, fname)
+        try:
+            model = YOLO(model_path)
+            results = model(image_path)
+            for r in results:
+                names = getattr(r, "names", {})
+                for box in getattr(r, "boxes", []):
+                    cls = int(box.cls[0])
+                    label = names.get(cls, "").lower()
+                    if label in {"person", "human"}:
+                        continue
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    points.append(((x1 + x2) / 2.0, (y1 + y2) / 2.0))
+        except Exception as e:  # pragma: no cover - inference may fail
+            print(f"[Worker] YOLO model {fname} failed: {e}")
+    return points
+
+
 def load_processed_set():
     """Build a set of base filenames that have already been processed."""
     processed = set()
@@ -163,13 +204,14 @@ def load_settings():
         default.update(settings)
     return default
 
-def generate_masks(image_path, settings):
+def generate_masks(image_path, settings, points=None):
     """Generate masks for a single image."""
     print("using sam")
     image = cv2.imread(image_path)
     if image is None:
-        return []
+        return [], None
 
+    masks = []
     mask_generator = SamAutomaticMaskGenerator(
         sam,
         points_per_side=settings["points_per_side"],
@@ -179,7 +221,22 @@ def generate_masks(image_path, settings):
        # min_mask_region_area=1000
     )
 
-    masks = mask_generator.generate(image)
+    masks.extend(mask_generator.generate(image))
+
+    if points:
+        predictor = SamPredictor(sam)
+        predictor.set_image(image)
+        for x, y in points:
+            try:
+                mask, _, _ = predictor.predict(
+                    point_coords=np.array([[x, y]]),
+                    point_labels=np.array([1]),
+                    multimask_output=False,
+                )
+                masks.append({"segmentation": mask[0]})
+            except Exception as e:  # pragma: no cover - prediction may fail
+                print(f"[Worker] SAM point prediction failed: {e}")
+
     return masks, image
 
 def save_masks(masks, image, base_name):
@@ -244,7 +301,8 @@ while True:
                     cv2.imwrite(crop_file, crop)
             else:
                 print("[Worker] Using SAM for segmentation")
-                masks, img = generate_masks(file_path, settings)
+                yolo_points = _get_yolo_points(file_path)
+                masks, img = generate_masks(file_path, settings, yolo_points)
 
 
                 if masks:
