@@ -294,13 +294,37 @@
         head.className="albumHead"; head.dataset.original = a.original;
         const isOpen = !!openState[a.original]; const arrow = isOpen ? "▲" : "▼";
         head.innerHTML = `
-          <img class="thumb" src="${a.original_url}" alt="">
+          <div class="thumbWrap" style="position:relative;">
+            <img class="thumb" src="${a.original_url}" alt="">
+          </div>
           <div class="meta">
             <b>${a.original}</b>
             <span>${a.crops.length} clipping${a.crops.length===1?"":"s"}</span>
           </div>
           <div class="arrow" style="margin-left:auto;color:var(--sub);">${arrow}</div>
         `;
+
+        // overlay YOLO points as stars on thumbnail
+        if(a.yolo && a.yolo.points && a.yolo.points.length){
+          const tw=head.querySelector('.thumbWrap');
+          const w=a.yolo.width, h=a.yolo.height; const box=96;
+          let sw,sh,offX,offY;
+          if(w>=h){
+            sw=box; sh=h*(box/w); offX=0; offY=(box-sh)/2;
+          }else{
+            sh=box; sw=w*(box/h); offX=(box-sw)/2; offY=0;
+          }
+          a.yolo.points.forEach(pt=>{
+            const star=document.createElement('div');
+            star.textContent='★';
+            star.style.position='absolute';
+            star.style.color='yellow';
+            star.style.fontSize='12px';
+            const x=offX + (pt[0]/w)*sw; const y=offY + (pt[1]/h)*sh;
+            star.style.left=`${x-6}px`; star.style.top=`${y-6}px`;
+            tw.appendChild(star);
+          });
+        }
 
         const body = document.createElement("div");
         body.className="albumBody"; body.style.display = isOpen ? "block" : "none";

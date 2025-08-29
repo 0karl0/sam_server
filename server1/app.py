@@ -22,6 +22,7 @@ RESIZED_DIR  = os.path.join(SHARED_DIR, "resized")            # ≤1024 for SAM
 MASKS_DIR    = os.path.join(SHARED_DIR, "output", "masks")    # from Server2
 CROPS_DIR    = os.path.join(SHARED_DIR, "output", "crops")    # RGBA crops
 SMALLS_DIR   = os.path.join(SHARED_DIR, "output", "smalls")
+POINTS_DIR   = os.path.join(SHARED_DIR, "output", "points")
 PROCESSED_FILE = os.path.join(SHARED_DIR, "output", "processed.json")
 CONFIG_DIR   = os.path.join(SHARED_DIR, "config")
 SETTINGS_JSON = os.path.join(CONFIG_DIR, "settings.json")
@@ -30,7 +31,7 @@ CROPS_INDEX   = os.path.join(CROPS_DIR, "index.json")         # manifest linking
 MAX_RESIZE = 1024  # longest side for SAM
 ALLOWED_EXT = {"png", "jpg", "jpeg", "webp", "bmp", "tiff", "heic", "heif"}
 
-for d in [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR, CONFIG_DIR]:
+for d in [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR, CONFIG_DIR, POINTS_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # Register HEIF opener for Pillow
@@ -254,10 +255,24 @@ def list_originals():
             except Exception:
                 pass
             crops.append({"file": c, "url": f"/crops/{c}", "area": area})
+
+        points_info = None
+        base_name = os.path.splitext(f)[0]
+        pts_path = os.path.join(POINTS_DIR, f"{base_name}.json")
+        if os.path.exists(pts_path):
+            try:
+                with open(pts_path, "r") as pf:
+                    pts = json.load(pf)
+                if isinstance(pts, dict) and "points" in pts:
+                    points_info = pts
+            except Exception:
+                points_info = None
+
         albums.append({
             "original": f,
             "original_url": f"/input/{f}",
-            "crops": crops
+            "crops": crops,
+            "yolo": points_info
         })
 
     return jsonify(albums)
