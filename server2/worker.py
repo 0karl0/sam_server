@@ -46,7 +46,7 @@ CROPS_DIR = os.path.join(SHARED_DIR, "output", "crops")
 CONFIG_FILE = os.path.join(SHARED_DIR, "config", "settings.json")
 MODEL_PATH = os.path.join(SHARED_DIR, "models", "vit_l.pth")
 PROCESSED_FILE = os.path.join(SHARED_DIR, "output", "processed.json")
-YOLO_MODELS_DIR = os.path.join(SHARED_DIR, "output", "models")
+YOLO_MODELS_DIR = os.path.join(SHARED_DIR, "models")
 POINTS_DIR = os.path.join(SHARED_DIR, "output", "points")
 BOXES_DIR = os.path.join(SHARED_DIR, "output", "boxes")
 
