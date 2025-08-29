@@ -47,6 +47,7 @@ CONFIG_FILE = os.path.join(SHARED_DIR, "config", "settings.json")
 MODEL_PATH = os.path.join(SHARED_DIR, "models", "vit_l.pth")
 PROCESSED_FILE = os.path.join(SHARED_DIR, "output", "processed.json")
 YOLO_MODELS_DIR = os.path.join(SHARED_DIR, "output", "models")
+POINTS_DIR = os.path.join(SHARED_DIR, "output", "points")
 
 AREA_THRESH = 1000  # pixel area below which masks are treated as "smalls"
 
@@ -64,6 +65,7 @@ _REMBG_SESSION = new_session("birefnet-dis", providers=_REMBG_PROVIDERS)
 os.makedirs(MASKS_DIR, exist_ok=True)
 os.makedirs(SMALLS_DIR, exist_ok=True)
 os.makedirs(CROPS_DIR, exist_ok=True)
+os.makedirs(POINTS_DIR, exist_ok=True)
 
 
 def _refine_mask_with_rembg(image_bgr: np.ndarray) -> np.ndarray:
@@ -154,6 +156,20 @@ def _get_yolo_points(image_path: str) -> list[tuple[float, float]]:
         except Exception as e:  # pragma: no cover - inference may fail
             print(f"[Worker] YOLO model {fname} failed: {e}")
     return points
+
+
+def _save_yolo_points(points: list[tuple[float, float]], base_name: str, width: int, height: int) -> None:
+    """Persist YOLO midpoint data for later display on thumbnails."""
+
+    try:
+        data = {"width": width, "height": height, "points": points}
+        out_path = os.path.join(POINTS_DIR, f"{base_name}.json")
+        tmp = out_path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, out_path)
+    except Exception as e:  # pragma: no cover - best effort only
+        print(f"[Worker] Failed to save YOLO points for {base_name}: {e}")
 
 
 def load_processed_set():
@@ -304,6 +320,9 @@ while True:
                 print("[Worker] Using SAM for segmentation")
                 yolo_points = _get_yolo_points(file_path)
                 masks, img = generate_masks(file_path, settings, yolo_points)
+                if img is not None and yolo_points:
+                    h, w = img.shape[:2]
+                    _save_yolo_points(yolo_points, base, w, h)
 
 
                 if masks:
