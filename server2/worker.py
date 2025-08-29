@@ -130,10 +130,16 @@ def _crop_with_mask(image_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray | Non
     return bgra[y:y+h, x:x+w]
 
 
-def _get_yolo_points(image_path: str) -> list[tuple[float, float]]:
-    """Run all YOLO models and return midpoints of non-human boxes."""
+def _get_yolo_points(image_path: str) -> list[tuple[float, float, int]]:
+    """Run all YOLO models and return midpoints labeled for SAM.
 
-    points: list[tuple[float, float]] = []
+    Each returned tuple is ``(x, y, label)`` where ``label`` is ``1`` for
+    regular objects (positive point) and ``0`` for detected humans (negative
+    point). The center of any ``person``/``human`` box becomes a negative
+    selector so SAM can avoid that region.
+    """
+
+    points: list[tuple[float, float, int]] = []
     if not _YOLO_AVAILABLE or not os.path.isdir(YOLO_MODELS_DIR):
         return points
 
@@ -149,17 +155,29 @@ def _get_yolo_points(image_path: str) -> list[tuple[float, float]]:
                 for box in getattr(r, "boxes", []):
                     cls = int(box.cls[0])
                     label = names.get(cls, "").lower()
-                    if label in {"person", "human"}:
-                        continue
                     x1, y1, x2, y2 = box.xyxy[0].tolist()
-                    points.append(((x1 + x2) / 2.0, (y1 + y2) / 2.0))
+                    cx = (x1 + x2) / 2.0
+                    cy = (y1 + y2) / 2.0
+                    if label in {"person", "human"}:
+                        points.append((cx, cy, 0))
+                    else:
+                        points.append((cx, cy, 1))
         except Exception as e:  # pragma: no cover - inference may fail
             print(f"[Worker] YOLO model {fname} failed: {e}")
     return points
 
 
-def _save_yolo_points(points: list[tuple[float, float]], base_name: str, width: int, height: int) -> None:
-    """Persist YOLO midpoint data for later display on thumbnails."""
+def _save_yolo_points(
+    points: list[tuple[float, float, int]],
+    base_name: str,
+    width: int,
+    height: int,
+) -> None:
+    """Persist YOLO midpoint data for later display on thumbnails.
+
+    ``points`` is a list of ``(x, y, label)`` tuples. Labels are stored so the
+    frontend can distinguish positive and negative selectors if desired.
+    """
 
     try:
         data = {"width": width, "height": height, "points": points}
@@ -222,7 +240,13 @@ def load_settings():
     return default
 
 def generate_masks(image_path, settings, points=None):
-    """Generate masks for a single image."""
+    """Generate masks for a single image.
+
+    ``points`` is an optional list of ``(x, y, label)`` tuples where ``label``
+    is ``1`` for positive selectors and ``0`` for negative selectors. Each
+    positive point is evaluated with all negative points supplied to SAM so that
+    detections such as humans can be excluded from the resulting masks.
+    """
     print("using sam")
     image = cv2.imread(image_path)
     if image is None:
@@ -243,11 +267,19 @@ def generate_masks(image_path, settings, points=None):
     if points:
         predictor = SamPredictor(sam)
         predictor.set_image(image)
-        for x, y in points:
+
+        pos = [(x, y) for x, y, lbl in points if lbl == 1]
+        neg = [(x, y) for x, y, lbl in points if lbl == 0]
+        neg_arr = np.array(neg) if neg else np.empty((0, 2))
+        neg_labels = np.zeros(len(neg), dtype=np.int32)
+
+        for x, y in pos:
+            coords = np.vstack(([[x, y]], neg_arr))
+            labels = np.concatenate(([1], neg_labels))
             try:
                 mask, _, _ = predictor.predict(
-                    point_coords=np.array([[x, y]]),
-                    point_labels=np.array([1]),
+                    point_coords=coords,
+                    point_labels=labels,
                     multimask_output=False,
                 )
                 masks.append({"segmentation": mask[0]})
