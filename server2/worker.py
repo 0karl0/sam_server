@@ -159,6 +159,10 @@ def _get_yolo_points(image_path: str) -> list[tuple[float, float, int]]:
     for fname in os.listdir(YOLO_MODELS_DIR):
         if not fname.lower().endswith((".pt", ".onnx")):
             continue
+        # Skip any non-YOLO models such as the BirefNet weights which share
+        # the models directory but are incompatible with the YOLO API.
+        if "birefnet" in fname.lower():
+            continue
         model_path = os.path.join(YOLO_MODELS_DIR, fname)
         print(f"[Worker] Running YOLO model {fname}")
         try:
