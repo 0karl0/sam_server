@@ -137,28 +137,38 @@ def ensure_settings_defaults() -> dict:
             json.dump(defaults, f, indent=2)
     return defaults
 
-def make_rgba_crop(original_bgr: np.ndarray, mask_gray: np.ndarray) -> np.ndarray | None:
+def make_rgba_crops(original_bgr: np.ndarray, mask_gray: np.ndarray) -> List[np.ndarray]:
+    """Return RGBA crops for each disconnected region in ``mask_gray``.
+
+    The mask is applied as an alpha channel on top of ``original_bgr``. Each
+    connected component in the mask becomes its own crop. An empty mask results
+    in an empty list.
     """
-    Apply mask as alpha channel to original and crop to bbox.
-    Returns RGBA (H,W,4) or None if mask empty.
-    """
-    # Ensure mask matches original size
+
     if mask_gray.shape != original_bgr.shape[:2]:
-        mask_gray = cv2.resize(mask_gray, (original_bgr.shape[1], original_bgr.shape[0]), interpolation=cv2.INTER_NEAREST)
+        mask_gray = cv2.resize(
+            mask_gray,
+            (original_bgr.shape[1], original_bgr.shape[0]),
+            interpolation=cv2.INTER_NEAREST,
+        )
 
-    # Binary 0/255 uint8
     mask_u8 = (mask_gray > 0).astype(np.uint8) * 255
-    coords = cv2.findNonZero(mask_u8)
-    if coords is None:
-        return None
-    x, y, w, h = cv2.boundingRect(coords)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        mask_u8, connectivity=8
+    )
 
-    # Convert to BGRA and apply alpha
+    crops: List[np.ndarray] = []
     bgra = cv2.cvtColor(original_bgr, cv2.COLOR_BGR2BGRA)
-    bgra[:, :, 3] = mask_u8
+    for i in range(1, num_labels):
+        x, y, w, h, area = stats[i]
+        if area == 0:
+            continue
+        component_mask = (labels == i).astype(np.uint8) * 255
+        crop = bgra[y : y + h, x : x + w].copy()
+        crop[:, :, 3] = component_mask[y : y + h, x : x + w]
+        crops.append(crop)
 
-    crop = bgra[y:y+h, x:x+w]
-    return crop
+    return crops
 
 # -------------------------
 # Upload & Settings
@@ -394,29 +404,30 @@ def process_mask_file(mask_path: str):
     if orig_bgr is None or mask_gray is None:
         return
 
-    crop_rgba = make_rgba_crop(orig_bgr, mask_gray)
-    if crop_rgba is None or crop_rgba.size == 0:
+    crops = make_rgba_crops(orig_bgr, mask_gray)
+    if not crops:
         return
 
-    out_name = fname  # keep same naming pattern to match mask index (transparent crop image)
-    out_path = os.path.join(CROPS_DIR, out_name)
-    cv2.imwrite(out_path, crop_rgba)  # PNG with alpha
-
-    # Save thumbnail for UI
-    try:
-        pil_crop = Image.fromarray(cv2.cvtColor(crop_rgba, cv2.COLOR_BGRA2RGBA))
-        thumb_path = os.path.join(THUMBS_DIR, out_name)
-        normalize_to_png_and_save(pil_crop, thumb_path, longest_side=256)
-    except Exception:
-        pass
-
-    # Update manifest
     index = load_crops_index()
     crops_for_original = index.get(f"{base}.png", [])
-    if out_name not in crops_for_original:
-        crops_for_original.append(out_name)
-        index[f"{base}.png"] = crops_for_original
-        save_crops_index(index)
+    for idx, crop_rgba in enumerate(crops):
+        out_name = fname[:-4] + f"_{idx}.png"
+        out_path = os.path.join(CROPS_DIR, out_name)
+        cv2.imwrite(out_path, crop_rgba)  # PNG with alpha
+
+        # Save thumbnail for UI
+        try:
+            pil_crop = Image.fromarray(cv2.cvtColor(crop_rgba, cv2.COLOR_BGRA2RGBA))
+            thumb_path = os.path.join(THUMBS_DIR, out_name)
+            normalize_to_png_and_save(pil_crop, thumb_path, longest_side=256)
+        except Exception:
+            pass
+
+        if out_name not in crops_for_original:
+            crops_for_original.append(out_name)
+
+    index[f"{base}.png"] = crops_for_original
+    save_crops_index(index)
 
 def mask_watcher_loop():
     while True:
