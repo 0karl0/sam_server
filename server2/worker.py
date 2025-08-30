@@ -102,6 +102,19 @@ def _is_line_drawing(image_bgr: np.ndarray) -> bool:
     return result
 
 
+def _has_long_lines(image_bgr: np.ndarray) -> bool:
+    """Return True if prominent straight lines are detected in the image."""
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150)
+    lines = cv2.HoughLinesP(
+        edges, 1, np.pi / 180, threshold=80, minLineLength=60, maxLineGap=10
+    )
+    count = 0 if lines is None else len(lines)
+    result = lines is not None and count > 0
+    print(f"[Decision] _has_long_lines: count={count} -> {result}")
+    return result
+
+
 def _is_mostly_one_color(image_bgr: np.ndarray, mask: np.ndarray, std_thresh: float = 5.0) -> bool:
     """Return True if the region defined by mask has little color variation."""
     if mask.shape != image_bgr.shape[:2]:
@@ -392,9 +405,11 @@ while True:
             img = cv2.imread(file_path)
             if img is None:
                 continue
-            if _is_line_drawing(img):
-                print("[Worker] Using rembg for line drawing")
-                mask = _refine_mask_with_rembg(img)
+            simple = _is_line_drawing(img) or _has_long_lines(img)
+            yolo_points = [] if simple else _get_yolo_points(file_path)
+            if simple or not yolo_points:
+                print("[Worker] Using BirefNet for segmentation")
+                mask = _refine_mask_with_birefnet(img)
                 crop = _crop_with_mask(img, mask)
                 mask_file = os.path.join(MASKS_DIR, f"{base}_mask0.png")
                 cv2.imwrite(mask_file, mask.astype(np.uint8) * 255)
@@ -403,15 +418,15 @@ while True:
                     cv2.imwrite(crop_file, crop)
             else:
                 print("[Worker] Using SAM for segmentation")
-                yolo_points = _get_yolo_points(file_path)
                 masks, img = generate_masks(file_path, settings, yolo_points)
                 if img is not None and yolo_points:
                     h, w = img.shape[:2]
                     _save_yolo_points(yolo_points, base, w, h)
 
-
                 if masks:
-                    largest = max(masks, key=lambda m: int(np.count_nonzero(m["segmentation"])))
+                    largest = max(
+                        masks, key=lambda m: int(np.count_nonzero(m["segmentation"]))
+                    )
                     if _is_mostly_one_color(img, largest["segmentation"]):
                         try:
                             print("refining with birefnet")
