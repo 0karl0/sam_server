@@ -27,11 +27,12 @@ PROCESSED_FILE = os.path.join(SHARED_DIR, "output", "processed.json")
 CONFIG_DIR   = os.path.join(SHARED_DIR, "config")
 SETTINGS_JSON = os.path.join(CONFIG_DIR, "settings.json")
 CROPS_INDEX   = os.path.join(CROPS_DIR, "index.json")         # manifest linking crops to original
+THUMBS_DIR   = os.path.join(SHARED_DIR, "output", "thumbs")   # thumbnails for UI
 
 MAX_RESIZE = 1024  # longest side for SAM
 ALLOWED_EXT = {"png", "jpg", "jpeg", "webp", "bmp", "tiff", "heic", "heif"}
 
-for d in [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR, CONFIG_DIR, POINTS_DIR]:
+for d in [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR, THUMBS_DIR, CONFIG_DIR, POINTS_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # Register HEIF opener for Pillow
@@ -210,6 +211,10 @@ def upload():
     resized_png = os.path.join(RESIZED_DIR, f"{stem}.png")
     normalize_to_png_and_save(pil_img, resized_png, longest_side=MAX_RESIZE)
 
+    # Save a smaller thumbnail for quick listing in /thumbs
+    thumb_png = os.path.join(THUMBS_DIR, f"{stem}.png")
+    normalize_to_png_and_save(pil_img, thumb_png, longest_side=256)
+
     return jsonify({"status": "ok", "original": f"{stem}.png"})
 
 # --- serve originals (normalized PNGs) ---
@@ -217,6 +222,10 @@ def upload():
 @app.route("/input/<path:filename>", methods=["GET"])
 def serve_input(filename):
     return send_from_directory(INPUT_DIR, filename)
+
+@app.route("/thumbs/<path:filename>", methods=["GET"])
+def serve_thumb(filename):
+    return send_from_directory(THUMBS_DIR, filename)
 
 # Albums: originals (from /input) + their crops (from crops index)
 @app.route("/list_originals", methods=["GET"])
@@ -227,8 +236,9 @@ def list_originals():
       {
         "original": "penguin.png",
         "original_url": "/input/penguin.png",
+        "thumb_url": "/thumbs/penguin.png",
         "crops": [
-          {"file": "penguin_mask0.png", "url": "/crops/penguin_mask0.png"},
+          {"file": "penguin_mask0.png", "url": "/crops/penguin_mask0.png", "thumb_url": "/thumbs/penguin_mask0.png"},
           ...
         ]
       },
@@ -254,7 +264,8 @@ def list_originals():
                     area = int(h * w)
             except Exception:
                 pass
-            crops.append({"file": c, "url": f"/crops/{c}", "area": area})
+            thumb_url = f"/thumbs/{c}" if os.path.exists(os.path.join(THUMBS_DIR, c)) else f"/crops/{c}"
+            crops.append({"file": c, "url": f"/crops/{c}", "thumb_url": thumb_url, "area": area})
 
         points_info = None
         base_name = os.path.splitext(f)[0]
@@ -268,9 +279,11 @@ def list_originals():
             except Exception:
                 points_info = None
 
+        orig_thumb = f"/thumbs/{f}" if os.path.exists(os.path.join(THUMBS_DIR, f)) else f"/input/{f}"
         albums.append({
             "original": f,
             "original_url": f"/input/{f}",
+            "thumb_url": orig_thumb,
             "crops": crops,
             "yolo": points_info
         })
@@ -334,7 +347,7 @@ def list_crops():
 @app.route("/clear_all", methods=["POST"])
 def clear_all():
     """Remove all processed images and trackers."""
-    dirs = [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR]
+    dirs = [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR, THUMBS_DIR]
     for d in dirs:
         for name in os.listdir(d):
             path = os.path.join(d, name)
@@ -388,6 +401,14 @@ def process_mask_file(mask_path: str):
     out_name = fname  # keep same naming pattern to match mask index (transparent crop image)
     out_path = os.path.join(CROPS_DIR, out_name)
     cv2.imwrite(out_path, crop_rgba)  # PNG with alpha
+
+    # Save thumbnail for UI
+    try:
+        pil_crop = Image.fromarray(cv2.cvtColor(crop_rgba, cv2.COLOR_BGRA2RGBA))
+        thumb_path = os.path.join(THUMBS_DIR, out_name)
+        normalize_to_png_and_save(pil_crop, thumb_path, longest_side=256)
+    except Exception:
+        pass
 
     # Update manifest
     index = load_crops_index()
