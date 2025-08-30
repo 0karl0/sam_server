@@ -341,6 +341,29 @@ def generate_masks(image_path, settings, points=None):
 
     return masks, image
 
+def merge_touching_masks(masks: list[dict], image_shape: tuple[int, int]) -> list[dict]:
+    """Merge masks that overlap or touch into single masks.
+
+    All input mask segmentations are resized to ``image_shape`` and combined.
+    Connected components in the union are returned as individual masks.
+    """
+    h, w = image_shape
+    if not masks:
+        return []
+
+    merged = np.zeros((h, w), dtype=np.uint8)
+    for m in masks:
+        seg = m["segmentation"].astype(np.uint8)
+        if seg.shape != (h, w):
+            seg = cv2.resize(seg, (w, h), interpolation=cv2.INTER_NEAREST)
+        merged |= seg
+
+    num_labels, labels = cv2.connectedComponents(merged)
+    combined: list[dict] = []
+    for lbl in range(1, num_labels):
+        combined.append({"segmentation": labels == lbl})
+    return combined
+
 def save_masks(masks, image, base_name):
     """Save each mask individually without merging.
 
@@ -410,7 +433,8 @@ while True:
                     _save_yolo_points(yolo_points, base, w, h)
 
 
-                if masks:
+                if masks and img is not None:
+                    masks = merge_touching_masks(masks, img.shape[:2])
                     largest = max(masks, key=lambda m: int(np.count_nonzero(m["segmentation"])))
                     if _is_mostly_one_color(img, largest["segmentation"]):
                         try:
