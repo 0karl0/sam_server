@@ -341,51 +341,6 @@ def generate_masks(image_path, settings, points=None):
 
     return masks, image
 
-def merge_overlapping_masks(masks: list[dict], image_shape: tuple[int, int]) -> list[dict]:
-    """Merge masks that overlap into single masks.
-
-    Masks that only touch are kept separate. All mask segmentations are resized
-    to ``image_shape`` before merging.
-    """
-    h, w = image_shape
-    if not masks:
-        return []
-
-    resized: list[np.ndarray] = []
-    for m in masks:
-        seg = m["segmentation"].astype(np.uint8)
-        if seg.shape != (h, w):
-            seg = cv2.resize(seg, (w, h), interpolation=cv2.INTER_NEAREST)
-        resized.append(seg.astype(bool))
-
-    parent = list(range(len(resized)))
-
-    def find(x: int) -> int:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a: int, b: int) -> None:
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[rb] = ra
-
-    for i in range(len(resized)):
-        for j in range(i + 1, len(resized)):
-            if np.any(resized[i] & resized[j]):
-                union(i, j)
-
-    groups: dict[int, np.ndarray] = {}
-    for idx, seg in enumerate(resized):
-        root = find(idx)
-        if root in groups:
-            groups[root] |= seg
-        else:
-            groups[root] = seg.copy()
-
-    return [{"segmentation": mask} for mask in groups.values()]
-
 def save_masks(masks, image, base_name):
     """Save each mask individually without merging.
 
@@ -455,8 +410,7 @@ while True:
                     _save_yolo_points(yolo_points, base, w, h)
 
 
-                if masks and img is not None:
-                    masks = merge_overlapping_masks(masks, img.shape[:2])
+                if masks:
                     largest = max(masks, key=lambda m: int(np.count_nonzero(m["segmentation"])))
                     if _is_mostly_one_color(img, largest["segmentation"]):
                         try:
