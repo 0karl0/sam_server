@@ -134,15 +134,35 @@ def _is_mostly_one_color(image_bgr: np.ndarray, mask: np.ndarray, std_thresh: fl
     return result
 
 
-def _crop_with_mask(image_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray | None:
+def _crop_with_mask(image_bgr: np.ndarray, mask: np.ndarray) -> list[np.ndarray]:
+    """Return RGBA crops for each disconnected region in ``mask``.
+
+    The incoming ``mask`` is expected to be a boolean or ``0/1`` array where
+    non-zero values represent foreground.  We find connected components in the
+    mask and return a list of cropped RGBA images, one per component.  Regions
+    with no foreground pixels result in an empty list.
+    """
+
     mask_u8 = (mask > 0).astype(np.uint8) * 255
-    coords = cv2.findNonZero(mask_u8)
-    if coords is None:
-        return None
-    x, y, w, h = cv2.boundingRect(coords)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        mask_u8, connectivity=8
+    )
+
+    crops: list[np.ndarray] = []
+    if num_labels <= 1:
+        return crops
+
     bgra = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2BGRA)
-    bgra[:, :, 3] = mask_u8
-    return bgra[y:y+h, x:x+w]
+    for i in range(1, num_labels):
+        x, y, w, h, area = stats[i]
+        if area == 0:
+            continue
+        component_mask = (labels == i).astype(np.uint8) * 255
+        crop = bgra[y : y + h, x : x + w].copy()
+        crop[:, :, 3] = component_mask[y : y + h, x : x + w]
+        crops.append(crop)
+
+    return crops
 
 
 def _get_yolo_points(image_path: str) -> list[tuple[float, float, int]]:
@@ -410,11 +430,11 @@ while True:
             if simple or not yolo_points:
                 print("[Worker] Using BirefNet for segmentation")
                 mask = _refine_mask_with_birefnet(img)
-                crop = _crop_with_mask(img, mask)
+                crops = _crop_with_mask(img, mask)
                 mask_file = os.path.join(MASKS_DIR, f"{base}_mask0.png")
                 cv2.imwrite(mask_file, mask.astype(np.uint8) * 255)
-                if crop is not None:
-                    crop_file = os.path.join(CROPS_DIR, f"{base}_mask0.png")
+                for idx, crop in enumerate(crops):
+                    crop_file = os.path.join(CROPS_DIR, f"{base}_mask0_{idx}.png")
                     cv2.imwrite(crop_file, crop)
             else:
                 print("[Worker] Using SAM for segmentation")
