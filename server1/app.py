@@ -5,8 +5,18 @@ import time
 from typing import List, Dict
 import shutil
 
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import (
+    Flask,
+    render_template,
+    request,
+    jsonify,
+    send_from_directory,
+    redirect,
+    url_for,
+    session,
+)
 from werkzeug.utils import secure_filename
+import requests
 
 import numpy as np
 import cv2
@@ -16,7 +26,10 @@ import pillow_heif  # enables HEIC/HEIF decode in Pillow
 # -------------------------
 # Paths / Constants
 # -------------------------
-SHARED_DIR   = "/mnt/shared"
+# Base directory for shared storage. Defaults to "/mnt/shared" but can be
+# overridden via the SHARED_DIR environment variable so both servers can point
+# to a common network location (e.g., an EFS mount or s3fs bucket on EC2).
+SHARED_DIR   = os.getenv("SHARED_DIR", "/mnt/shared")
 INPUT_DIR    = os.path.join(SHARED_DIR, "input")              # originals (PNG-normalized)
 RESIZED_DIR  = os.path.join(SHARED_DIR, "resized")            # ≤1024 for SAM
 MASKS_DIR    = os.path.join(SHARED_DIR, "output", "masks")    # from Server2
@@ -28,20 +41,174 @@ CONFIG_DIR   = os.path.join(SHARED_DIR, "config")
 SETTINGS_JSON = os.path.join(CONFIG_DIR, "settings.json")
 CROPS_INDEX   = os.path.join(CROPS_DIR, "index.json")         # manifest linking crops to original
 THUMBS_DIR   = os.path.join(SHARED_DIR, "output", "thumbs")   # thumbnails for UI
+MODELS_DIR   = os.path.join(SHARED_DIR, "models")              # downloaded weights
 
 MAX_RESIZE = 1024  # longest side for SAM
 ALLOWED_EXT = {"png", "jpg", "jpeg", "webp", "bmp", "tiff", "heic", "heif"}
 
-for d in [INPUT_DIR, RESIZED_DIR, MASKS_DIR, CROPS_DIR, SMALLS_DIR, THUMBS_DIR, CONFIG_DIR, POINTS_DIR]:
+for d in [
+    INPUT_DIR,
+    RESIZED_DIR,
+    MASKS_DIR,
+    CROPS_DIR,
+    SMALLS_DIR,
+    THUMBS_DIR,
+    CONFIG_DIR,
+    POINTS_DIR,
+    MODELS_DIR,
+]:
     os.makedirs(d, exist_ok=True)
 
 # Register HEIF opener for Pillow
 pillow_heif.register_heif_opener()
 
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET", "change-me")
+
+# Load up to two user credentials from environment variables
+# Expect pairs APP_USER1/APP_PASS1 and APP_USER2/APP_PASS2
+USERS: Dict[str, str] = {}
+for i in (1, 2):
+    user = os.getenv(f"APP_USER{i}")
+    pw = os.getenv(f"APP_PASS{i}")
+    if user and pw:
+        USERS[user] = pw
+
+# RunPod configuration
+RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY", "")
+GPU_POD_ID = os.getenv("GPU_POD_ID", "")
+GPU_ACTIVE = False
+USER_LOGGED_IN = False
+_last_work_time = time.time()
 
 # Track which mask files have been processed into crops
 _processed_mask_files = set()
+
+
+# -------------------------
+# Model downloads
+# -------------------------
+def _download_file(url: str, dest: str) -> None:
+    if os.path.exists(dest):
+        return
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    tmp = dest + ".tmp"
+    try:
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with open(tmp, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+        os.replace(tmp, dest)
+    except Exception:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def ensure_models() -> None:
+    models = {
+        "vit_l.pth": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth",
+        "birefnet-dis.onnx": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-DIS-epoch_590.onnx",
+        "yolov8n.pt": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt",
+        "yolov8n-seg.pt": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n-seg.pt",
+    }
+    for fname, url in models.items():
+        _download_file(url, os.path.join(MODELS_DIR, fname))
+
+
+ensure_models()
+
+
+# -------------------------
+# GPU lifecycle helpers
+# -------------------------
+def runpod_request(query: str, variables: dict) -> dict:
+    url = "https://api.runpod.io/graphql"
+    headers = {"Authorization": f"Bearer {RUNPOD_API_KEY}"}
+    try:
+        r = requests.post(url, headers=headers, json={"query": query, "variables": variables})
+        return r.json()
+    except Exception:
+        return {}
+
+
+def start_gpu_pod() -> None:
+    global GPU_ACTIVE, _last_work_time
+    if GPU_ACTIVE or not RUNPOD_API_KEY or not GPU_POD_ID:
+        return
+    query = """
+      mutation StartPod($podId: ID!) {
+        podStart(input: { podId: $podId }) {
+          id
+          desiredStatus
+        }
+      }
+    """
+    runpod_request(query, {"podId": GPU_POD_ID})
+    GPU_ACTIVE = True
+    _last_work_time = time.time()
+
+
+def stop_gpu_pod() -> None:
+    global GPU_ACTIVE
+    if not GPU_ACTIVE or not RUNPOD_API_KEY or not GPU_POD_ID:
+        return
+    query = """
+      mutation StopPod($podId: ID!) {
+        podStop(input: { podId: $podId }) {
+          id
+          desiredStatus
+        }
+      }
+    """
+    runpod_request(query, {"podId": GPU_POD_ID})
+    GPU_ACTIVE = False
+
+
+def has_unprocessed_files() -> bool:
+    files = [f for f in os.listdir(RESIZED_DIR) if f.lower().endswith(".png")]
+    if not files:
+        return False
+    processed = set()
+    if os.path.exists(PROCESSED_FILE):
+        try:
+            with open(PROCESSED_FILE, "r") as f:
+                processed = set(json.load(f))
+        except Exception:
+            pass
+    for f in files:
+        if os.path.splitext(f)[0] not in processed:
+            return True
+    return False
+
+
+def gpu_monitor_loop() -> None:
+    global _last_work_time
+    while True:
+        pending = has_unprocessed_files()
+        if USER_LOGGED_IN:
+            if pending and not GPU_ACTIVE:
+                start_gpu_pod()
+            if pending:
+                _last_work_time = time.time()
+            elif GPU_ACTIVE and time.time() - _last_work_time > 300:
+                stop_gpu_pod()
+        else:
+            if GPU_ACTIVE:
+                stop_gpu_pod()
+        time.sleep(30)
+
+
+@app.before_request
+def require_login():
+    global USER_LOGGED_IN, _last_work_time
+    if request.endpoint in {"login", "static"}:
+        return
+    if "user" not in session:
+        return redirect(url_for("login"))
+    USER_LOGGED_IN = True
+    _last_work_time = time.time()
+
 
 # -------------------------
 # Helpers
@@ -169,6 +336,32 @@ def make_rgba_crops(original_bgr: np.ndarray, mask_gray: np.ndarray) -> List[np.
         crops.append(crop)
 
     return crops
+
+# -------------------------
+# Authentication
+# -------------------------
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        if USERS.get(username) == password:
+            session["user"] = username
+            start_gpu_pod()
+            return redirect(url_for("index"))
+        error = "Invalid credentials"
+    return render_template("login.html", error=error)
+
+
+@app.route("/logout")
+def logout():
+    session.pop("user", None)
+    global USER_LOGGED_IN
+    USER_LOGGED_IN = False
+    stop_gpu_pod()
+    return redirect(url_for("login"))
 
 # -------------------------
 # Upload & Settings
@@ -447,6 +640,7 @@ def mask_watcher_loop():
 
 # Start background watcher before serving
 threading.Thread(target=mask_watcher_loop, daemon=True).start()
+threading.Thread(target=gpu_monitor_loop, daemon=True).start()
 
 # -------------------------
 # Run

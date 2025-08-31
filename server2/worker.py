@@ -4,6 +4,7 @@ import json
 import cv2
 import gc
 import numpy as np
+import runpod
 from PIL import Image
 from rembg import remove, new_session
 from segment_anything import (
@@ -29,16 +30,21 @@ try:
         "CUDAExecutionProvider",
         "CPUExecutionProvider",
     ] if torch.cuda.is_available() else ["CPUExecutionProvider"]
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 except Exception:  # pragma: no cover - torch may not be installed
     print("couldn't import torch")
     torch = None  # type: ignore
     _TORCH_AVAILABLE = False
     _REMBG_PROVIDERS = ["CPUExecutionProvider"]
+    DEVICE = "cpu"
 
 # -------------------------
 # Config / directories
 # -------------------------
-SHARED_DIR = "/mnt/shared"
+# Base directory for shared storage, overridable via SHARED_DIR env var to
+# point at a network-mounted location (e.g., S3 or EFS) accessible from both
+# Server1 on EC2 and this RunPod worker.
+SHARED_DIR = os.getenv("SHARED_DIR", "/mnt/shared")
 RESIZED_DIR = os.path.join(SHARED_DIR, "resized")
 MASKS_DIR = os.path.join(SHARED_DIR, "output", "masks")
 SMALLS_DIR = os.path.join(SHARED_DIR, "output", "smalls")
@@ -61,6 +67,7 @@ AREA_THRESH = 1000  # pixel area below which masks are treated as "smalls"
 # ``birefnet-dis.onnx`` file is picked up automatically.
 os.environ.setdefault("U2NET_HOME", os.path.join(SHARED_DIR, "models"))
 _REMBG_SESSION = new_session("birefnet-dis", providers=_REMBG_PROVIDERS)
+print(f"[Worker] rembg providers: {_REMBG_SESSION.get_providers()}")
 
 
 os.makedirs(MASKS_DIR, exist_ok=True)
@@ -68,6 +75,8 @@ os.makedirs(SMALLS_DIR, exist_ok=True)
 os.makedirs(CROPS_DIR, exist_ok=True)
 os.makedirs(POINTS_DIR, exist_ok=True)
 os.makedirs(BOXES_DIR, exist_ok=True)
+os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+os.makedirs(YOLO_MODELS_DIR, exist_ok=True)
 
 
 def _refine_mask_with_rembg(image_bgr: np.ndarray) -> np.ndarray:
@@ -200,7 +209,8 @@ def _get_yolo_points(image_path: str) -> list[tuple[float, float, int]]:
         print(f"[Worker] Running YOLO model {fname}")
         try:
             model = YOLO(model_path)
-            results = model(image_path)
+            yolo_device = 0 if DEVICE == "cuda" else "cpu"
+            results = model(image_path, device=yolo_device)
             model_img = img.copy() if img is not None else None
             for r in results:
                 names = getattr(r, "names", {})
@@ -305,7 +315,7 @@ def save_processed_set(processed_set):
 # Load SAM model
 # -------------------------
 sam = sam_model_registry["vit_l"](checkpoint=MODEL_PATH)
-sam.to("cpu")  # CPU-only
+sam.to(DEVICE)
 
 # -------------------------
 # Helper functions
@@ -401,19 +411,20 @@ def save_masks(masks, image, base_name):
             big_idx += 1
         cv2.imwrite(out_path, out)
 
-# -------------------------
-# Watcher loop
-# -------------------------
-processed = load_processed_set()
+def process_new_images() -> int:
+    """Process any unprocessed images found in the resized directory.
 
-while True:
+    Returns the number of images that were processed.
+    """
+
+    processed = load_processed_set()
     settings = load_settings()
     files = [f for f in os.listdir(RESIZED_DIR) if f.endswith((".png", ".jpg", ".jpeg"))]
     if not files:
         print("[Worker] No pages found")
-        time.sleep(2)
-        continue
+        return 0
     print(f"[Worker] Found {len(files)} page(s): {files}")
+    count = 0
     for f in files:
         base = os.path.splitext(f)[0]
         if base in processed:
@@ -474,11 +485,28 @@ while True:
                             masks.append(inverse)
                 save_masks(masks, img, base)
             processed.add(base)
-            save_processed_set(processed)
+            count += 1
             gc.collect()
             end = time.process_time()
             total = end - start
-            print(f'elapsed time: {total:.6f} seconds')
+            print(f"elapsed time: {total:.6f} seconds")
         except Exception as e:
             print(f"[Worker] Error processing {f}: {e}")
-    time.sleep(2)
+    save_processed_set(processed)
+    return count
+
+
+def handler(job):  # type: ignore
+    """RunPod serverless handler."""
+    try:
+        _ = job.get("input", {})
+    except Exception as e:
+        return {"status": "error", "message": f"Invalid input: {e}"}
+    try:
+        processed = process_new_images()
+        return {"status": "success", "processed": processed}
+    except Exception as e:  # pragma: no cover - best effort
+        return {"status": "error", "message": str(e)}
+
+
+runpod.serverless.start({"handler": handler})
